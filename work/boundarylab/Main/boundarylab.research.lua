@@ -584,7 +584,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.38 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.39 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
@@ -727,8 +727,7 @@ function R.Init()
     api.ui2.MapResources("BoundaryLabUI")
     local uiHooks=g.require("forgeutils.uihookmanager")
     uiHooks:AddImportHook("HUD","/js/boundarylab/research.js")
-    -- Load our module directly. A loading view must not depend on an import
-    -- hook that may be absent from its cached/copy-inherited UI implementation.
+    -- Import from the concrete Show callback, after the native view is ready.
     -- The persistent loading view may already be ready when this mod initializes.
     local existing=api.forgeutils and api.forgeutils.uiHookManagerState
     for wrapper,view in g.pairs(existing and existing.wrappers or {}) do
@@ -736,25 +735,12 @@ function R.Init()
     end
     -- Forge's hook manager also handles a UI wrapper loaded before this mod.
     local hooks=g.require("forgeutils.hookmanager")
-    hooks:AddHook("UI.LoadingScreenUI","Init",function(original,self,settings)
-        if settings.sViewName=="LoadingScreen" then
-            local copy={}
-            for key,value in g.pairs(settings) do copy[key]=value end
-            copy.sViewAddress="coui://UIGameface/boundarylab/LoadingScreen.html"
-            loadingDiagnostics.routed=loadingDiagnostics.routed+1
-            return original(self,copy)
-        end
-        return original(self,settings)
-    end)
-    -- Hook the concrete subclass too: it can retain inherited methods copied
-    -- before the base wrapper's hooks were installed.
-    hooks:AddHook("UI.LoadingScreenUI","_OnReadyCallback",function(original,self,...)
-        local result=original(self,...)
+    -- Show is defined on LoadingScreenUI itself. Do not wrap inherited Init,
+    -- replace its HTML address, or alter the loading world's lifecycle.
+    hooks:AddHook("UI.LoadingScreenUI","Show",function(original,self,...)
         attachLoading(self)
-        return result
-    end)
-    hooks:AddHook("UI.LoadingScreenUI","Shutdown",function(original,self,...)
-        loadingWrappers[self]=nil
+        self:TriggerEventAtNextAdvance("ForgeUtils_AddImportHook","/js/boundarylab/loading.js")
+        loadingDiagnostics.routed=loadingDiagnostics.routed+1
         return original(self,...)
     end)
     hooks:AddHook("UI.GamefaceUIWrapper","_OnReadyCallback",function(original,self,...)

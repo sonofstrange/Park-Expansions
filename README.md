@@ -18,7 +18,7 @@ Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open
 
 ## Compatibility
 
-Development version **0.38-test**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
+Development version **0.39-test**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
 
 The maximum tested buildable width is 2040 m, leaving a 4 m margin at each terrain edge. Setting 4096 in the config does not generate a larger terrain.
 
@@ -70,3 +70,7 @@ The small package remains a test build pending manual game confirmation. The pub
 The loading page now imports the overlay directly alongside the original game's LoadingScreen app. Only the LoadingScreen view's page address changes; its native callbacks, depth and animation remain intact. Hooks also target the concrete UI.LoadingScreenUI subclass so they do not rely solely on base-class hooks. The overlay no longer depends on a ForgeUtils import event reaching this view.
 
 Copy Report includes loading-page routing, ready and received-progress counters. This change is awaiting manual visual confirmation. A biome already in the generated cache may prepare too quickly for the bar to remain visible.
+
+### 0.39 loading-screen recovery
+
+0.38 caused a startup stall in manual testing and was rolled back. Its replacement loading page is no longer used. 0.39 imports the overlay only from the concrete LoadingScreenUI.Show callback, after the native UI is ready; it does not hook inherited Init or change the page URL. Loading-page acknowledgement counters remain available in Copy Report. The visual result is awaiting manual confirmation. Terrain generation itself was confirmed working in 0.37.

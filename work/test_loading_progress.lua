@@ -1,7 +1,7 @@
 local hooks,listeners,events={},{},{}
 local wrapper={tInitSettings={sViewName="LoadingScreen"},IsReady=function()return true end,
  AddEventListener=function(_,name,count,callback)assert(count==0 or(name=="ParkExpansions_LoadingAck" and count==1));listeners[name]=callback end,
- TriggerEventAtNextAdvance=function(_,name,...)assert(name=="ParkExpansions_LoadProgress" and select('#',...)==1);events[#events+1]=... end}
+ TriggerEventAtNextAdvance=function(_,name,...)assert((name=="ParkExpansions_LoadProgress" or name=="ForgeUtils_AddImportHook") and select('#',...)==1);events[#events+1]=... end}
 api={ui2={MapResources=function()end},world={GetWorldAPIs=function()error("Loading UI must not query uninitialized park APIs")end},forgeutils={uiHookManagerState={wrappers={[wrapper]="LoadingScreen"}}}}
 local originalRequire=require
 require=function(name)
@@ -17,19 +17,16 @@ local count=#events;R.LoadingProgress(true,34.9,'Preparing "terrain"');assert(#e
 listeners.ParkExpansions_RequestLoadProgress();assert(#events==count+1)
 R.LoadingProgress(true,200,'Ready');assert(events[#events]=='[true,100,"Ready"]')
 R.LoadingProgress(false,100,'Ready');assert(events[#events]=='[false,100,"Ready"]')
-hooks["UI.LoadingScreenUI.Shutdown"](function()end,wrapper)
+hooks["UI.GamefaceUIWrapper.Shutdown"](function()end,wrapper)
 count=#events;R.LoadingProgress(true,12,'Next park');assert(#events==count)
 print('PASS loading-view replay, single JSON payload, escaping, clamping, deduplication, shutdown and no park API access')
 
-local settings={sViewName="LoadingScreen",sViewAddress="coui://UIGameface/LoadingScreen.html",nViewDepth=10,bStartEnabled=true,fnOnReadyCallback=function()end}
-local seen
-local result=hooks["UI.LoadingScreenUI.Init"](function(self,value)seen=value;return 42 end,{},settings)
-assert(result==42 and seen~=settings)
-assert(seen.sViewAddress=="coui://UIGameface/boundarylab/LoadingScreen.html")
-assert(settings.sViewAddress=="coui://UIGameface/LoadingScreen.html" and seen.nViewDepth==10 and seen.fnOnReadyCallback==settings.fnOnReadyCallback)
-local unchanged={sViewName="HUD",sViewAddress="original"}
-hooks["UI.LoadingScreenUI.Init"](function(self,value)assert(value==unchanged)end,{},unchanged)
-local nextView={tInitSettings=seen,IsReady=wrapper.IsReady,AddEventListener=wrapper.AddEventListener,TriggerEventAtNextAdvance=wrapper.TriggerEventAtNextAdvance}
-hooks["UI.LoadingScreenUI._OnReadyCallback"](function()return 42 end,nextView)
+assert(hooks["UI.LoadingScreenUI.Init"]==nil and hooks["UI.LoadingScreenUI._OnReadyCallback"]==nil)
+local called=false
+local before=#events
+local result=hooks["UI.LoadingScreenUI.Show"](function(self,animate,callback)called=true;assert(animate==true and callback=="native callback");return 42 end,wrapper,true,"native callback")
+assert(called and result==42)
+assert(events[#events]=='/js/boundarylab/loading.js')
+assert(wrapper.tInitSettings.sViewAddress==nil,"Original loading page must remain untouched")
 listeners.ParkExpansions_LoadingReady();listeners.ParkExpansions_LoadingAck(34)
-print('PASS concrete loading subclass routes a direct entry page, preserves native settings and binds readiness/ack events')
+print('PASS concrete Show imports the overlay after readiness, preserves native arguments and never replaces the loading page')
