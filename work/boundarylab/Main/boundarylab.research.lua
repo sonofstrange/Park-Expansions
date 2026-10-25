@@ -100,7 +100,7 @@ local function attachLoading(wrapper)
     loadingDirty=true
 end
 function R.AdvanceLoading(world)
-    loadingDiagnostics.ticks=(loadingDiagnostics.ticks or 0)+1
+    loadingDiagnostics.worldTicks=(loadingDiagnostics.worldTicks or 0)+1
     local wrapper=world.loadingScreenUI
     if not wrapper or not wrapper:IsReady() then return end
     attachLoading(wrapper)
@@ -115,6 +115,14 @@ function R.AdvanceLoading(world)
         wrapper:TriggerEventAtNextAdvance("ParkExpansions_LoadProgress",payload)
         loadingDirty=false
     end
+end
+
+function R.AdvanceGlobalLoading()
+    loadingDiagnostics.ticks=(loadingDiagnostics.ticks or 0)+1
+    if not loadingDirty and not loadingState.active then return end
+    if not api.world.IsLoaded("loadingscreen") then return end
+    local world=api.world.GetScript("loadingscreen")
+    if world then R.AdvanceLoading(world) end
 end
 
 function R.Push()
@@ -596,7 +604,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.40 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.41 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
@@ -613,6 +621,8 @@ function R.Report()
         .."\nMANUAL_HEIGHT="..g.tostring(settings(current).ManualMaxHeight)
         .."\nCONFIG_WARNING="..g.tostring(settings(current).warning)
         .."\nCONFIG_ERROR="..g.tostring(settings(current).error)
+        .."\nLOADING_UI_DRIVER="..g.tostring(loadingDiagnostics.driver)
+        .."\nLOADING_UI_WORLD_TICKS="..g.tostring(loadingDiagnostics.worldTicks or 0)
         .."\nLOADING_UI_TICKS="..g.tostring(loadingDiagnostics.ticks or 0)
         .."\nLOADING_UI_ROUTED="..g.tostring(loadingDiagnostics.routed)
         .."\nLOADING_UI_VIEWS="..g.tostring(loadingDiagnostics.views)
@@ -741,14 +751,28 @@ function R.Init()
     local uiHooks=g.require("forgeutils.uihookmanager")
     uiHooks:AddImportHook("HUD","/js/boundarylab/research.js")
     local hooks=g.require("forgeutils.hookmanager")
-    -- LoadingScreenWorld is active while the park's OnLoad coroutine yields.
-    -- Keep native UI work in that world's context, not in the half-loaded park.
-    hooks:AddHook("LoadingScreenWorld","Advance",function(original,self,...)
-        local result=original(self,...)
-        local ok,message=g.pcall(R.AdvanceLoading,self)
-        if not ok then loadingDiagnostics.error=g.tostring(message) end
-        return result
-    end)
+    -- The loading script is not a require() module in this build. Wrap the
+    -- live game environment instead: BaseGame.AdvancePreWorld calls this
+    -- instance's OnPhase dynamically, outside the park-loading coroutine.
+    local ok,environment=g.pcall(function()return api.game.GetEnvironment()end)
+    if ok and g.type(environment)=="table" and g.type(environment.OnPhase)=="function" then
+        if not environment.parkExpansionsLoadingDriver then
+            local phase=environment.OnPhase
+            environment.OnPhase=function(self,name,...)
+                local result=phase(self,name,...)
+                if name=="Advance" then
+                    local success,message=g.pcall(R.AdvanceGlobalLoading)
+                    if not success then loadingDiagnostics.error=g.tostring(message) end
+                end
+                return result
+            end
+            environment.parkExpansionsLoadingDriver=true
+        end
+        loadingDiagnostics.driver=true
+    else
+        loadingDiagnostics.driver=false
+        loadingDiagnostics.error="Game environment Advance callback was unavailable."
+    end
     hooks:AddHook("UI.GamefaceUIWrapper","_OnReadyCallback",function(original,self,...)
         local result=original(self,...)
         if self.tInitSettings.sViewName=="HUD" and not wrappers[self] then

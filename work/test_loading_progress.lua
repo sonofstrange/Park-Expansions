@@ -13,7 +13,13 @@ local wrapper={tInitSettings={sViewName="LoadingScreen",sViewAddress="coui://UIG
   assert(select('#',...)==1,"Native event must have one payload")
   events[#events+1]={name,...}
  end}
-api={ui2={MapResources=function()end},world={GetWorldAPIs=function()error("Uninitialized park APIs queried")end}}
+local phaseCalls=0
+local environment={OnPhase=function(self,name,cached,dt)assert(self==environment or self.OnPhase);phaseCalls=phaseCalls+1;return 42 end}
+local world={loadingScreenUI=wrapper}
+local loaded=true
+api={game={GetEnvironment=function()return environment end},ui2={MapResources=function()end},world={GetWorldAPIs=function()error("Uninitialized park APIs queried")end,
+ IsLoaded=function(name)assert(loadingContext and name=="loadingscreen");return loaded end,
+ GetScript=function(name)assert(loadingContext and name=="loadingscreen");return world end}}
 local originalRequire=require
 require=function(name)
  if name=="forgeutils.uihookmanager"then return{AddImportHook=function(_,view,path)assert(view=="HUD")end}end
@@ -23,11 +29,10 @@ end
 local R=assert(loadfile('work/boundarylab/Main/boundarylab.research.lua'))()
 R.Init();assert(#events==0)
 assert(hooks["UI.LoadingScreenUI.Init"]==nil and hooks["UI.LoadingScreenUI.Show"]==nil)
-local world={loadingScreenUI=wrapper}
 local count=0
 local function tick()
  loadingContext=true
- local value=hooks["LoadingScreenWorld.Advance"](function(self,dt)assert(self==world and dt==0.016);count=count+1;return 42 end,world,0.016)
+ local value=environment:OnPhase("Advance",true,0.016);count=count+1
  loadingContext=false;assert(value==42)
 end
 R.LoadingProgress(true,0,"Preparing terrain")
@@ -53,4 +58,5 @@ before=#events;tick();assert(#events==before,"Unchanged frame sent another paylo
 world.loadingScreenUI=nil;R.LoadingProgress(true,10,"Next map");tick();assert(#events==before,"Destroyed view was used")
 world.loadingScreenUI=wrapper;ready=false;tick();assert(#events==before)
 assert(wrapper.tInitSettings.sViewAddress=="coui://UIGameface/LoadingScreen.html")
-print('PASS park-load and UI callbacks make zero native UI requests; loading-world ticks own registration/import/dispatch, replay, teardown and readiness')
+assert(environment.parkExpansionsLoadingDriver and phaseCalls==count)
+print('PASS live game environment drives publisher; park-load and UI callbacks make zero native UI requests; loading-world ticks own registration/import/dispatch, replay, teardown and readiness')
