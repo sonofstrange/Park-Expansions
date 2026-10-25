@@ -1,4 +1,4 @@
--- Park Expansions 0.35: extends copied voxel storage; original terrain is retained.
+-- Park Expansions 0.36: extends copied voxel storage; original terrain is retained.
 local g = _G
 local api = g.api
 local M = {}
@@ -143,7 +143,7 @@ end
 
 local function notice(message)
     log(message)
-    local report = "Park Expansions 0.35 report\n" .. g.table.concat(reportLines,"\n")
+    local report = "Park Expansions 0.36 report\n" .. g.table.concat(reportLines,"\n")
     local copied,result = g.pcall(function()
         return api.world.GetWorldAPIs().editors:CopyToClipboard(report)
     end)
@@ -151,7 +151,7 @@ local function notice(message)
         and "\n\nReport copied to clipboard. Paste it in chat with Ctrl+V."
         or "\n\nClipboard unavailable. Short result: " .. g.tostring(M.lastCode or "BL22-ERROR")
     g.require("Helpers.PopUpDialogUtils").RunOKDialog(
-        "[STRING_LITERAL:Value=|Park Expansions 0.35|]",
+        "[STRING_LITERAL:Value=|Park Expansions 0.36|]",
         "[STRING_LITERAL:Value=|" .. message .. hint .. "|]")
 end
 
@@ -201,7 +201,8 @@ local function loadLargeTerrain(self,loader,originalLoad)
     local top = maximum:GetY()+1
     local depth = top-minimum:GetY()+1
     local checks = {}
-    local checkChunk = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Maps/GroundChecks.lua","t",checks)
+    local checkChunk = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Maps/" .. filename:gsub("%.bin$",".checks.lua"),"t",checks)
+    if not checkChunk then checkChunk = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Maps/GroundChecks.lua","t",checks) end
     local checkOK = checkChunk and g.pcall(checkChunk)
     local expected = checkOK and checks.Heights and checks.Heights[filename]
     if g.type(expected) ~= "table" then
@@ -225,14 +226,14 @@ end
 local function expand(self,requestedWidth,allowShrink)
     reportLines = {}
     M.lastCode = "BL22-ERROR"
-    log("RUN Park Expansions 0.35")
+    log("RUN Park Expansions 0.36")
     for _,line in g.ipairs(self.boundaryLabLoadLines or {}) do log(line) end
     local cfg = {}
     local chunk, err = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Config.ini", "t", cfg)
     g.assert(chunk, g.tostring(err))
     chunk()
     if requestedWidth then cfg.Mode="expand";cfg.Shape="rectangle";cfg.Factor=requestedWidth/1024 end
-    Research.Progress(self,5,"Checking park boundary…")
+    Research.Progress(self,5,"Checking park boundaryвЂ¦")
     g.coroutine.yield()
     cfg.Shape = cfg.Shape or "rectangle"
     g.assert(cfg.Shape == "rectangle" or cfg.Shape == "scale","Invalid boundary shape")
@@ -345,7 +346,7 @@ local function expand(self,requestedWidth,allowShrink)
         end
         log("TARGET_RECTANGLE x=" .. -h .. ".." .. h .. " z=" .. -h .. ".." .. h .. " posts=" .. nPosts)
     end
-    Research.Progress(self,15,"Preparing new boundary…")
+    Research.Progress(self,15,"Preparing new boundaryвЂ¦")
     g.coroutine.yield()
     local samples = {}
     for post in g.pairs(selection.tControlPosts) do
@@ -601,7 +602,7 @@ local function expand(self,requestedWidth,allowShrink)
     -- This API flag is per world; only the disposable BoundaryLab world reaches here.
     w.boundary:SetBoundaryEditEnabled(true)
     local hierarchy,changes = makeChanges(cfg.Factor)
-    Research.Progress(self,82,"Validating expansion…")
+    Research.Progress(self,82,"Validating expansionвЂ¦")
     g.coroutine.yield()
     local busy,preview = api.undo.PreviewChangeList(hierarchy:GetFullUndoChangeList())
     self.boundaryLabPreview = preview
@@ -652,14 +653,14 @@ local function expand(self,requestedWidth,allowShrink)
             .. " (" .. controlDetail .. "). Trials: " .. g.table.concat(summary,", ")
             .. ". ALL previews cancelled. Code: " .. M.lastCode,0)
     end
-    Research.Progress(self,90,"Applying expansion…")
+    Research.Progress(self,90,"Applying expansionвЂ¦")
     g.coroutine.yield()
     wait(api.undo.CommitPreview(preview))
     self.boundaryLabCommitResult={seed=self.boundaryLabPreparedSeed,
         bounds={-rectangleHalf,rectangleHalf,-rectangleHalf,rectangleHalf}}
     self.boundaryLabPreview = nil
     api.undo.Checkpoint({})
-    Research.Progress(self,96,"Updating park area…")
+    Research.Progress(self,96,"Updating park areaвЂ¦")
     for _ = 1,120 do g.coroutine.yield() end
     local gained,beforeInside,afterInside = 0,0,0
     for _,sample in g.ipairs(samples) do
@@ -678,7 +679,7 @@ local function expand(self,requestedWidth,allowShrink)
     end
     M.lastCode = "BL22-COMMIT-OK"
     Research.Progress(self,100,"Park expanded.")
-    self.boundaryLabReport="Park Expansions 0.35 report\n"..g.table.concat(reportLines,"\n")
+    self.boundaryLabReport="Park Expansions 0.36 report\n"..g.table.concat(reportLines,"\n")
     if requestedWidth then return end
     notice((cfg.Shape == "rectangle" and "COMMIT COMPLETE - rectangle " .. rectangleHalf*2 .. " x " .. rectangleHalf*2 .. " m"
         or "COMMIT COMPLETE - contour scaled by " .. cfg.Factor)
@@ -748,5 +749,5 @@ function M.AddLuaHooks(add)
     end)
 end
 
-log("DATABASE LOADED - Park Expansions 0.35 experimental expansion")
+log("DATABASE LOADED - Park Expansions 0.36 experimental expansion")
 return M

@@ -9,3 +9,5 @@ build/
 dist/
 *.park2
 **/AutoConversion/
+
+/work/bridge-payload.json

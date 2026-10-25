@@ -3,6 +3,7 @@ from pathlib import Path
 import argparse, ctypes, hashlib, json, os, re, struct, sys, traceback, zlib
 from convert_park import convert, read_archive, payload, BIOMES
 from terrain_codec import clients, unpack
+from generate_maps import ensure_maps
 
 
 def lua(value):
@@ -129,8 +130,13 @@ def main():
     state=cache/('State-'+args.nonce+'.lua')
     def progress(percent,message): write_state(state,status='working',progress=percent,message=message)
     try:
+        if args.identifier=='__prepare_map__':
+            write_state(state,**ensure_maps(mod,args.biome,progress))
+            return 0
         progress(1,'Finding the selected local save')
         if args.biome.casefold() not in BIOMES: raise ValueError('Unsupported park biome')
+        # Lua prepares the map before conversion. Validate the same cache here.
+        ensure_maps(mod,args.biome,lambda percent,message: None)
         source=find_source(saved_games(),args.identifier,args.name,args.biome)
         _,original_records=read_archive(source)
         original_data=next(d for i,d in original_records if i.filename=='parkdata')

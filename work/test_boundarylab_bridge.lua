@@ -28,7 +28,7 @@ listeners.BoundaryLab_RequestState.callback()
 assert(captured:sub(1,1)=="[")
 local world={}
 R.BeforeLoad(world)
-R.Progress(world,17.25,'Quote " and slash \\ and newline\ncontrol\1 and текст')
+R.Progress(world,17.25,'Quote " and slash \\ and newline\ncontrol\1 and С‚РµРєСЃС‚')
 local file=assert(io.open('work/bridge-payload.json','wb'));file:write(captured);file:close()
 hooks.Shutdown(function()end,wrapper)
 captured=nil;R.Push();assert(captured==nil,"Retained a destroyed HUD wrapper")

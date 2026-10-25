@@ -1,0 +1,161 @@
+"""Generate the tested 2048 m terrain from the installed game, on demand."""
+from pathlib import Path
+import hashlib, json, os, zlib
+from terrain_codec import Volume, unpack, clients, put_uint, digest, decode_density, encode_density, material_parts
+from stock_terrain import COLLAR
+
+GENERATOR_VERSION = 36
+BIOMES = {n.lower(): n+'Sandbox' for n in ('Temperate','Tropical','Taiga','Mediterranean')}
+
+def extend(blob,name,game_dir,progress):
+    from terrain_transition import SourceEdges,exterior_root
+    from stock_terrain import StockTerrain,COLLAR
+    old=Volume(blob)
+    assert old.shape==[2,1,2]
+    target=(4,9,4)
+    signs=bytearray(18)
+    chunks=[]
+    densities=[]
+    materials=[[],[],[],[]]
+    old_density=decode_density(old.deltas)
+    old_materials=material_parts(old)
+    edges=SourceEdges(old,old_density)
+    skirt_path=game_dir/'TerrainSkirts'/name/(name+'.bakedHeightMap')
+    stock=StockTerrain(skirt_path,edges)
+    copies=[]
+    # Uniform nodes have no explicit samples; sign selects solid / empty.
+    uniform=b'\x00\x00'
+    for z in range(4):
+        for y in range(9):
+            for x in range(4):
+                index=(z*9+y)*4+x
+                progress(5+int(index*70/144), "Preparing terrain: "+str(index+1)+"/144")
+                if y==4 and x in (1,2) and z in (1,2):
+                    source=(z-1)*2+(x-1)
+                    tree,_,_,sign=old.roots[source]
+                    _,begin,end,_=old.roots[source]
+                    density=old_density[begin:end]
+                    mat=old_materials[source]
+                    copies.append((source,index))
+                elif x in (1,2) and z in (1,2) and y<4:
+                    tree,sign=uniform,0
+                    density=b'';mat=(b'',)*4
+                elif x in (1,2) and z in (1,2) and y>4:
+                    tree,sign=uniform,1
+                    density=b'';mat=(b'',)*4
+                else:
+                    tree,density,mat,sign=exterior_root(stock,x,z,y-2)
+                signs[index//8] |= sign << (index%8)
+                chunks.append(tree)
+                densities.append(density)
+                for channel,part in zip(materials,mat):channel.append(part)
+    tree=b''.join(chunks)
+    density=b''.join(densities)
+    material_stream=b''.join(b''.join(channel) for channel in materials)
+    header=b''.join(put_uint(v) for v in (5,*target,512,1))+b'\x00'
+    new_blob=header+signs+put_uint(len(tree))+put_uint(len(density))+tree+encode_density(density)+material_stream
+    new=Volume(new_blob)
+    assert new.shape==list(target)
+    new_density=decode_density(new.deltas)
+    new_materials=material_parts(new)
+    # Position and byte identity of each complete original 512-metre cube.
+    for source,index in copies:
+        before,begin,end,sign=old.roots[source]
+        after,new_begin,new_end,new_sign=new.roots[index]
+        assert before==after and end-begin==new_end-new_begin and sign==new_sign
+        assert old_density[begin:end]==new_density[new_begin:new_end]
+        assert old_materials[source]==new_materials[index]
+        old_pos=((source%2)*512-512,-256,(source//2)*512-512)
+        x=index%4;y=(index//4)%9;z=index//36
+        assert old_pos==(x*512-1024,y*512-2304,z*512-1024)
+    return new_blob,dict(original_geometry_sha256=digest(old.tree),
+        original_distance_sha256=digest(old.deltas),original_material_sha256=digest(old.materials),
+        preserved_root_count=4,original_sample_count=old.samples,new_sample_count=new.samples,
+        added_surface_sample_count=new.samples-old.samples,new_dimensions=[2048,4608,2048],
+        all_original_root_bytes_and_positions_verified=True,original_density_and_material_records_verified=True,
+        stock_heightmap_sha256=stock.sha256,stock_material_names=stock.names,
+        source_kind='original_baked_heightmap',transition_width=COLLAR,transition_edge_columns_without_crossing=edges.missing_columns,
+        source_background_alignment_max_error=stock.edge_alignment_error,
+        source_center_height=float(edges.center_height[0]),
+        transition_height_profiles=[h.tolist() for h in edges.heights],
+        outer_ground_probe_heights={str(x):float(stock.exterior(x,0)[0]) for x in (600,750,900)})
+
+
+def patch(raw, client_name, replacement):
+    size_start,size_end,sizes,blocks=clients(raw)
+    index=next(i for i,item in enumerate(blocks) if item[0]==client_name)
+    _,start,version_end,end=blocks[index]
+    marker=b"\x05\x02\x01\x02\xc2\x00\x01\x00"
+    position=raw.index(marker,version_end,end)
+    if raw.find(marker,position+1,end)!=-1: raise ValueError('Ambiguous source terrain')
+    sizes[index]+=len(replacement)-(end-position)
+    result=raw[:size_start]+put_uint(len(sizes))+b''.join(map(put_uint,sizes))+raw[size_end:position]+replacement+raw[end:]
+    new_blocks=clients(result)[3]
+    for a,b in zip(blocks,new_blocks):
+        if a[0]!=client_name and raw[a[1]:a[3]]!=result[b[1]:b[3]]:
+            raise ValueError('Non-terrain client changed during generation')
+    return result
+
+
+def source_blob(raw,client):
+    record=next(b for b in clients(raw)[3] if b[0]==client)
+    marker=b"\x05\x02\x01\x02\xc2\x00\x01\x00"
+    start=raw.index(marker,record[2],record[3])
+    if raw.find(marker,start+1,record[3])!=-1: raise ValueError('Ambiguous source terrain')
+    return raw[start:record[3]]
+
+
+def ensure_maps(mod_dir,biome,progress,game_dir=None):
+    mod_dir=Path(mod_dir).resolve()
+    name=BIOMES.get(biome.casefold())
+    if not name: raise ValueError('Unsupported terrain biome')
+    # Resolve the installation from Win64/ovldata/Mod_BoundaryLab.
+    game_dir=Path(game_dir).resolve() if game_dir is not None else mod_dir.parents[2]
+    sources=[game_dir/'Parks/Sandbox'/(name+ext) for ext in ('.bin','.trn')]
+    sources.append(game_dir/'TerrainSkirts'/name/(name+'.bakedHeightMap'))
+    if not all(p.is_file() for p in sources):
+        raise ValueError('Original park or landscape files were not found in the game installation')
+    inputs={str(p.relative_to(game_dir)).replace('\\','/'):digest(p.read_bytes()) for p in sources}
+    folder=mod_dir/'Maps';folder.mkdir(exist_ok=True)
+    manifest=folder/(name+'.generation.json')
+    outputs=[folder/(name+ext) for ext in ('.bin','.trn')]+[folder/(name+'.checks.lua')]
+    try:
+        saved=json.loads(manifest.read_text(encoding='utf-8'))
+        if (saved['version']==GENERATOR_VERSION and saved['inputs']==inputs
+            and all(p.is_file() and digest(p.read_bytes())==saved['outputs'][p.name] for p in outputs)):
+            progress(100,'Terrain ready')
+            return {'status':'map_ready','progress':100,'filename':name+'.bin','cached':True}
+    except (OSError,ValueError,KeyError,TypeError): pass
+    progress(2,'Reading original terrain')
+    prefix,raw=unpack(sources[0]);prefix_under,raw_under=unpack(sources[1])
+    blob=source_blob(raw,'VoxelTerrain')
+    under_blob=source_blob(raw_under,'VoxelTerrainUnderlay')
+    if blob!=under_blob: raise ValueError('Original terrain and underlay do not match')
+    replacement,report=extend(blob,name,game_dir,progress)
+    expected=report['outer_ground_probe_heights']
+    checks='Heights = {["'+name+'.bin"] = {'+', '.join('['+x+']='+repr(h) for x,h in expected.items())+'}}\n'
+    pending=[]
+    try:
+        for output,preamble,original,client in zip(outputs[:2],(prefix,prefix_under),(raw,raw_under),('VoxelTerrain','VoxelTerrainUnderlay')):
+            progress(82 if client=='VoxelTerrain' else 90,'Writing '+output.name)
+            result=patch(original,client,replacement)
+            data=preamble+zlib.compress(result,level=6,wbits=-15)
+            temp=output.with_suffix(output.suffix+'.pending')
+            pending.append(temp);temp.write_bytes(data)
+            if unpack(temp)!=(preamble,result): raise ValueError('Generated terrain verification failed')
+        check_pending=outputs[2].with_suffix('.lua.pending')
+        pending.append(check_pending);check_pending.write_text(checks,encoding='utf-8',newline='\n')
+        for p in sources:
+            if digest(p.read_bytes())!=inputs[p.relative_to(game_dir).as_posix()]:
+                raise ValueError('Original game files changed during terrain preparation')
+        hashes={p.name:digest(temp.read_bytes()) for temp,p in zip(pending,outputs)}
+        # Publish the manifest last. An interrupted pair is never accepted as a cache hit.
+        for temp,p in zip(pending,outputs): os.replace(temp,p)
+        temp_manifest=manifest.with_suffix('.json.pending')
+        temp_manifest.write_text(json.dumps({'version':GENERATOR_VERSION,'inputs':inputs,'outputs':hashes,'preservation':report},indent=2),encoding='utf-8')
+        os.replace(temp_manifest,manifest)
+    finally:
+        for temp in pending:
+            if temp.exists(): temp.unlink()
+    progress(100,'Terrain ready')
+    return {'status':'map_ready','progress':100,'filename':name+'.bin','cached':False}

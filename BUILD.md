@@ -1,6 +1,6 @@
-# Building Park Expansions 0.35
+# Building Park Expansions 0.36-test
 
-Run commands from the repository root on **64-bit Windows**. Source for every mod-specific compiled component is included. Prepared terrain files are checked in; the following builds reuse these files and do not regenerate the landscape. No game executable or save is needed to compile the DLL or worker.
+Run commands from the repository root on **64-bit Windows**. Source for every mod-specific compiled component is included. The earlier release terrain files remain checked in as regression references. The small package excludes them and generates its own cache at first use. No game executable or save is needed to compile the DLL or worker.
 
 ## Native bridge DLL
 
@@ -14,10 +14,10 @@ This compiles `work/compatibility/bridge.cpp` using MSVC `/std:c++17 /EHsc /O2 /
 
 ## Conversion worker EXE
 
-The worker consists of `auto_convert.py`, `convert_park.py` and `terrain_codec.py` in `work/compatibility/`. They use the Python standard library. The published worker used **64-bit CPython 3.14.6** and **PyInstaller 6.22.2**, in console/onedir mode. No UPX installation was used.
+The worker consists of `auto_convert.py`, `convert_park.py` and `terrain_codec.py` in `work/compatibility/`. The save converter uses the Python standard library; the new terrain generator also requires **NumPy 2.5.0**. Its sources are `generate_maps.py`, `stock_terrain.py` and `terrain_transition.py` in the same directory. The published worker used **64-bit CPython 3.14.6** and **PyInstaller 6.22.2**, in console/onedir mode. No UPX installation was used.
 
 ```bat
-python -m pip install PyInstaller==6.22.2
+python -m pip install PyInstaller==6.22.2 numpy==2.5.0
 tools\build_worker.cmd
 ```
 
@@ -49,6 +49,7 @@ work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_boundarylab_rese
 work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_boundarylab.lua
 work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_boundarylab_terrain.lua
 work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_auto_conversion_032.lua
+work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_map_preparation.lua
 ```
 
 The historical numeric suffix in a test filename is not the mod version. Placement, rendering, saving and reloading still require manual testing in the game.
@@ -59,4 +60,14 @@ The historical numeric suffix in a test filename is not the mod version. Placeme
 python tools/package.py
 ```
 
-Produces `dist/Park-Expansions-0.35.zip` with one `Mod_BoundaryLab` folder and no instructions inside. The repository also includes the original release binaries, prepared maps and third-party runtime. Rebuilding with a different toolchain may produce different binary hashes; byte-for-byte reproducibility is not claimed. See `release-manifest.json` for the original release hashes.
+Produces `dist/Park-Expansions-0.36-test.zip` with one `Mod_BoundaryLab` folder and no instructions inside. The repository also includes the original release binaries, prepared maps and third-party runtime. Rebuilding with a different toolchain may produce different binary hashes; byte-for-byte reproducibility is not claimed. See `release-manifest.json` for the original release hashes.
+
+## Terrain generation integration test
+
+Provide the path to your own installed game; this reads only stock assets and writes under the repository's ignored `build/` directory. Repeat for `temperate`, `tropical`, `taiga` and `mediterranean`:
+
+```bat
+python work/test_map_generation.py --game-dir "PATH_TO_PLANET_COASTER_2" --biome taiga
+```
+
+The test compares both generated files with the checked-in 0.35 references and checks cache reuse. First-use generation requires the original `Parks/Sandbox` and `TerrainSkirts` assets in the installation. The engine limit is unchanged: the generator deliberately retains the verified 2048 m horizontal extent.

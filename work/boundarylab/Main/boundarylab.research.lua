@@ -144,6 +144,84 @@ local function validConvertedInfo(info)
     return true
 end
 
+-- Prepare only the selected biome. No map payloads are shipped in the small package.
+-- A fresh process verifies input/output hashes once per biome per game session.
+local preparedMaps={}
+function R.PrepareMap(world)
+    local manager=world.parkLoadSaveManager
+    if not manager then return true end
+    local request=manager.tLoadParkFromFileRequest
+    local token=manager.tLoadParkFromSaveTokenRequest
+    local biome
+    local names={temperatesandbox="temperate",tropicalsandbox="tropical",
+        taigasandbox="taiga",mediterraneansandbox="mediterranean"}
+    if request and g.type(request.sFileName)=="string" then
+        local name=request.sFileName:lower():match("^/run/parks/sandbox/([^/]+)%.bin$")
+        biome=names[name]
+    elseif token and token.cSaveToken and g.type(api.save.GetSaveMetadata)=="function" then
+        if g.type(api.save.IsSaveToken)=="function" and not api.save.IsSaveToken(token.cSaveToken) then return true end
+        local ok,metadata=g.pcall(api.save.GetSaveMetadata,token.cSaveToken)
+        local save=ok and metadata and metadata.tSave
+        local mode=save and g.tostring(save.sGameMode):lower()
+        if save and save.parkExpansions and (mode=="sandbox" or mode=="challenge") then
+            local candidate=g.tostring(save.sGeome):lower()
+            for _,allowed in g.pairs(names) do if candidate==allowed then biome=candidate end end
+        end
+    end
+    if not biome or preparedMaps[biome] then return true end
+    local function fail(message)
+        world.parkExpansionsMapFailed=true
+        world.parkExpansionsAutoError=g.tostring(message)
+        return false
+    end
+    if not g.package or g.type(g.package.loadlib)~="function" then
+        return fail("Terrain preparation component is unavailable.")
+    end
+    local loaded,begin,message=g.pcall(g.package.loadlib,
+        "Win64/ovldata/Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll","Begin")
+    if not loaded or g.type(begin)~="function" then return fail("Could not load terrain preparation component: "..g.tostring(message or begin)) end
+    local nonce=g.tostring(g.math.random(1,1000000000)).."-"..g.tostring(g.math.random(1,1000000000))
+    local base="Win64/ovldata/Mod_BoundaryLab/AutoConversion/"
+    local function read(path)
+        local chunk=g.loadfile(path,"t",{})
+        if not chunk then return end
+        local ok,value=g.pcall(chunk)
+        if ok and g.type(value)=="table" then return value end
+    end
+    local ok,errorMessage=g.pcall(begin,"__prepare_map__","",biome,nonce)
+    if not ok then return fail(errorMessage) end
+    local bridge=read(base.."BridgeInfo.lua")
+    if not bridge or bridge.version~=32 or bridge.supported~=true then
+        return fail(bridge and bridge.message or "Terrain preparation bridge did not initialize.")
+    end
+    local accepted=read(base.."State-"..nonce..".lua")
+    if not accepted or accepted.status=="error" then
+        return fail(accepted and accepted.message or "Terrain preparation request was not accepted.")
+    end
+    local index=1
+    -- Coroutine yields keep the native loading screen responsive during generation.
+    for frame=1,108000 do
+        local result=read(base.."Result-"..nonce..".lua")
+        if not result then
+            result=read(base.."Progress-"..nonce.."-"..index..".lua")
+            if result then index=index+1 end
+        end
+        if result and result.status=="map_ready" then
+            local expected=biome:sub(1,1):upper()..biome:sub(2).."Sandbox.bin"
+            if result.filename~=expected then return fail("Prepared terrain response did not validate.") end
+            preparedMaps[biome]=true
+            world.boundaryLabProgress=0
+            return true
+        elseif result and result.status=="error" then return fail(result.message)
+        elseif result then
+            world.boundaryLabProgress=result.progress or 0
+            world.boundaryLabMessage=result.message or "Preparing terrainвЂ¦"
+        end
+        g.coroutine.yield()
+    end
+    return fail("Terrain preparation is still running. Try loading the park again after it finishes.")
+end
+
 -- The C-module only starts the bundled worker. It never writes game memory.
 -- Conversion completes before the native loader sees any world data.
 function R.AutoConvert(world)
@@ -224,7 +302,7 @@ function R.AutoConvert(world)
             -- Native park APIs and the new HUD are not ready yet. Keep load
             -- progress here without querying points or advancing a HUD wrapper.
             world.boundaryLabProgress=result.progress or 0
-            world.boundaryLabMessage=result.message or "Converting existing park…"
+            world.boundaryLabMessage=result.message or "Converting existing parkРІР‚В¦"
         end
         g.coroutine.yield()
     end
@@ -269,6 +347,13 @@ end
 function R.BeforeLoad(world)
     current=world
     R.LoadConfig(world)
+    local mapOK,mapResult=g.pcall(R.PrepareMap,world)
+    if not mapOK or mapResult==false then
+        world.parkExpansionsMapFailed=true
+        world.parkExpansionsAutoError=world.parkExpansionsAutoError or g.tostring(mapResult)
+        -- Do not send partially prepared terrain to the native loader.
+        g.error("Park Expansions: "..world.parkExpansionsAutoError,0)
+    end
     local autoOK,autoError=g.pcall(R.AutoConvert,world)
     if not autoOK then world.parkExpansionsAutoError="Automatic conversion failed: "..g.tostring(autoError) end
     R.ReadConvertedSave(world)
@@ -415,7 +500,7 @@ function R.Request(branch,level)
     world.boundaryLabRecovering=nil
     world.boundaryLabProgress=0
     world.boundaryLabCommitResult=nil
-    R.Progress(world,1,"Preparing expansion…")
+    R.Progress(world,1,"Preparing expansionРІР‚В¦")
     world.boundaryLabQueued=true
 end
 
@@ -430,7 +515,7 @@ function R.QueueManual(world)
     world.boundaryLabRecovering=nil
     world.boundaryLabProgress=0
     world.boundaryLabCommitResult=nil
-    world.boundaryLabMessage="Applying configured park limits…"
+    world.boundaryLabMessage="Applying configured park limitsРІР‚В¦"
     world.boundaryLabQueued=true
 end
 
@@ -442,7 +527,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.35 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.36 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
@@ -482,7 +567,7 @@ function R.Advance(world,expand)
                     world.boundaryLabCommitResult={seed=s.seed,bounds=bounds}
                 else expand(world,p.size,true) end
                 g.assert(world.boundaryLabCommitResult,"Configured boundary was not applied")
-                R.Progress(world,98,"Applying configured height…")
+                R.Progress(world,98,"Applying configured heightРІР‚В¦")
                 g.coroutine.yield()
                 R.ApplyHeight(world,nil,p.maximum)
                 R.Finish(world,true)
@@ -490,10 +575,10 @@ function R.Advance(world,expand)
                 expand(world,R.Widths[p.level])
                 R.Finish(world,world.boundaryLabCommitResult~=nil,"Boundary rejected. Research points refunded.")
             else
-                R.Progress(world,40,"Applying height upgrade…")
+                R.Progress(world,40,"Applying height upgradeРІР‚В¦")
                 g.coroutine.yield()
                 R.ApplyHeight(world,p.level)
-                R.Progress(world,90,"Finishing upgrade…")
+                R.Progress(world,90,"Finishing upgradeРІР‚В¦")
                 g.coroutine.yield()
                 R.Finish(world,true)
             end
