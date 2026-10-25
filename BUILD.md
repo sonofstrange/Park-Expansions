@@ -77,6 +77,7 @@ Loading overlay regression checks:
 ```bat
 node work/test_loading_ui.cjs
 work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_loading_progress.lua
+work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_loading_park_readiness.lua
 ```
 
 For the real Win64 argument-reader regression, build `bridge.cpp` as a separate DLL with `/DBRIDGE_TEST`, output `build/bridge_contract.dll`, then run `python work/test_native_argument_contract.py`. This test-only DLL is never distributed; the shipped DLL is built without `BRIDGE_TEST`.

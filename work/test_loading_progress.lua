@@ -2,7 +2,7 @@
 local hooks,listeners,events={},{},{}
 local loadingContext=false
 local ready=true
-local wrapper={tInitSettings={sViewName="LoadingScreen",sViewAddress="coui://UIGameface/LoadingScreen.html"},
+local wrapper={view="native-view",tInitSettings={sViewName="LoadingScreen",sViewAddress="coui://UIGameface/LoadingScreen.html"},
  IsReady=function()assert(loadingContext,"Readiness queried from park-loading context");return ready end,
  AddEventListener=function(_,name,count,callback)
   assert(loadingContext,"Native registration from park-loading context")
@@ -15,11 +15,11 @@ local wrapper={tInitSettings={sViewName="LoadingScreen",sViewAddress="coui://UIG
  end}
 local phaseCalls=0
 local environment={OnPhase=function(self,name,cached,dt)assert(self==environment or self.OnPhase);phaseCalls=phaseCalls+1;return 42 end}
-local world={loadingScreenUI=wrapper}
-local loaded=true
-api={game={GetEnvironment=function()return environment end},ui2={MapResources=function()end},world={GetWorldAPIs=function()error("Uninitialized park APIs queried")end,
- IsLoaded=function(name)assert(loadingContext and name=="loadingscreen");return loaded end,
- GetScript=function(name)assert(loadingContext and name=="loadingscreen");return world end}}
+local worldCalls=0
+api={game={GetEnvironment=function()return environment end},ui2={MapResources=function()end},world={
+ GetWorldAPIs=function()worldCalls=worldCalls+1;error("Uninitialized park APIs queried")end,
+ IsLoaded=function()worldCalls=worldCalls+1;error("Global loading tick must not resolve worlds")end,
+ GetScript=function()worldCalls=worldCalls+1;error("Global loading tick must not resolve world scripts")end}}
 local originalRequire=require
 require=function(name)
  if name=="forgeutils.uihookmanager"then return{AddImportHook=function(_,view,path)assert(view=="HUD")end}end
@@ -28,6 +28,10 @@ require=function(name)
 end
 local R=assert(loadfile('work/boundarylab/Main/boundarylab.research.lua'))()
 R.Init();assert(#events==0)
+local captured=hooks["UI.LoadingScreenUI.new"](function(class,callback)
+ assert(class=="LoadingScreenUI" and callback=="native-ready");return wrapper
+end,"LoadingScreenUI","native-ready")
+assert(captured==wrapper and #events==0,"View capture changed constructor behavior or called native UI")
 assert(hooks["UI.LoadingScreenUI.Init"]==nil and hooks["UI.LoadingScreenUI.Show"]==nil)
 local count=0
 local function tick()
@@ -35,6 +39,7 @@ local function tick()
  local value=environment:OnPhase("Advance",true,0.016);count=count+1
  loadingContext=false;assert(value==42)
 end
+tick();assert(#events==0,"Idle loading view imported native UI")
 R.LoadingProgress(true,0,"Preparing terrain")
 assert(#events==0,"Park load touched UI")
 tick();assert(events[1][1]=="ForgeUtils_AddImportHook"and events[1][2]=="/js/boundarylab/loading.js")
@@ -55,8 +60,19 @@ tick();assert(#events==before+1)
 assert(coroutine.resume(park));tick();assert(last()=='[true,61,"Converting park"]')
 assert(coroutine.resume(park));tick();assert(last()=='[false,100,"Done"]')
 before=#events;tick();assert(#events==before,"Unchanged frame sent another payload")
-world.loadingScreenUI=nil;R.LoadingProgress(true,10,"Next map");tick();assert(#events==before,"Destroyed view was used")
-world.loadingScreenUI=wrapper;ready=false;tick();assert(#events==before)
+hooks["UI.LoadingScreenUI.Shutdown"](function(self)
+ assert(self==wrapper);self.view=nil
+end,wrapper)
+R.LoadingProgress(true,10,"Next map");tick();assert(#events==before,"Destroyed view was used")
+wrapper.view="replacement-view"
+hooks["UI.LoadingScreenUI.new"](function()return wrapper end)
+ready=false;tick();assert(#events==before)
+hooks["UI.LoadingScreenUI.Shutdown"](function(self)self.view=nil end,wrapper)
+wrapper.view="registry-view"
+api.forgeutils={uiHookManagerState={wrappers={[wrapper]="LoadingScreen"}}}
+ready=true;tick();assert(#events>before,"Existing ForgeUtils loading view was not captured")
+assert(last()=='[true,10,"Next map"]')
+assert(worldCalls==0,"Uninitialized native world APIs were queried")
 assert(wrapper.tInitSettings.sViewAddress=="coui://UIGameface/LoadingScreen.html")
 assert(environment.parkExpansionsLoadingDriver and phaseCalls==count)
-print('PASS live game environment drives publisher; park-load and UI callbacks make zero native UI requests; loading-world ticks own registration/import/dispatch, replay, teardown and readiness')
+print('PASS captured loading-view lifecycle, no native world lookups, pure capture/callbacks, shutdown invalidation and unchanged phase behavior')

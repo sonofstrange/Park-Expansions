@@ -6,6 +6,7 @@ local R = {Widths={1152,1344,1536,1792,2040}, Heights={400,700,1000,1500,2048}, 
 local wrappers = g.setmetatable({}, {__mode="k"})
 local current
 local loadingWrappers=g.setmetatable({}, {__mode="k"})
+local loadingViews=g.setmetatable({}, {__mode="k"})
 local loadingState={active=false,percent=0,message=""}
 local loadingDiagnostics={routed=0,views=0,ready=0,updates=0,lastPercent=-1}
 
@@ -102,6 +103,7 @@ end
 function R.AdvanceLoading(world)
     loadingDiagnostics.worldTicks=(loadingDiagnostics.worldTicks or 0)+1
     local wrapper=world.loadingScreenUI
+    if wrapper and not loadingState.active and not loadingImports[wrapper] then return end
     if not wrapper or not wrapper:IsReady() then return end
     attachLoading(wrapper)
     if not loadingImports[wrapper] then
@@ -120,13 +122,34 @@ end
 function R.AdvanceGlobalLoading()
     loadingDiagnostics.ticks=(loadingDiagnostics.ticks or 0)+1
     if not loadingDirty and not loadingState.active then return end
-    if not api.world.IsLoaded("loadingscreen") then return end
-    local world=api.world.GetScript("loadingscreen")
-    if world then R.AdvanceLoading(world) end
+    -- Also find views created before this module's constructor hook was added.
+    -- ForgeUtils owns this Lua registry; reading it needs no native world scope.
+    local forge=api.forgeutils
+    local registry=forge and forge.uiHookManagerState and forge.uiHookManagerState.wrappers
+    for wrapper,name in g.pairs(registry or {}) do
+        if name=="LoadingScreen" and not loadingViews[wrapper] then
+            loadingViews[wrapper]=true
+            loadingDiagnostics.captured=(loadingDiagnostics.captured or 0)+1
+        end
+    end
+    -- A parked OnLoad coroutine does not guarantee a usable native world
+    -- context. Never resolve world APIs here, even inside pcall.
+    for wrapper in g.pairs(loadingViews) do
+        if wrapper.view~=nil and wrapper.tInitSettings~=nil then
+            R.AdvanceLoading({loadingScreenUI=wrapper})
+        else
+            loadingViews[wrapper]=nil
+            loadingWrappers[wrapper]=nil
+            loadingImports[wrapper]=nil
+        end
+    end
 end
 
 function R.Push()
     local world = current
+    -- HUD requests may arrive while PrepareMap is yielding before CPTWorld's
+    -- original OnLoad. A native access violation cannot be caught by pcall.
+    if not world or world.parkExpansionsParkReady~=true then return end
     local s = world and state(world) or {width=0,height=0,managed=false}
     local balance = 0
     if world then local ok,value=g.pcall(points);if ok and g.type(value)=="number" then balance=value end end
@@ -413,6 +436,7 @@ end
 
 function R.BeforeLoad(world)
     current=world
+    world.parkExpansionsParkReady=false
     R.LoadConfig(world)
     local mapOK,mapResult=g.pcall(R.PrepareMap,world)
     if not mapOK or mapResult==false then
@@ -450,6 +474,7 @@ function R.BeforeLoad(world)
 end
 
 function R.AfterLoad(world,templates)
+    world.parkExpansionsParkReady=true
     local s=state(world)
     local converted=world.parkExpansionsConverted
     if world.parkExpansionsMapFailed then
@@ -552,7 +577,7 @@ end
 
 function R.Request(branch,level)
     local world=current
-    if not world or (branch~="width" and branch~="height") then return end
+    if not world or not world.parkExpansionsParkReady or (branch~="width" and branch~="height") then return end
     if settings(world).ResearchEnabled==false then return end
     if not state(world).managed then
         world.boundaryLabMessage=world.parkExpansionsUnsupportedReason or "Expansion purchases are unavailable for this park. No points were spent."
@@ -597,14 +622,14 @@ function R.QueueManual(world)
 end
 
 function R.Report()
-    if not current then return end
+    if not current or current.parkExpansionsParkReady~=true then return end
     local s=state(current)
     local terrainOK,terrainBounds=g.pcall(function()
         local terrain=api.world.GetWorldAPIs().voxelterrain
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.43 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.44 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
@@ -625,6 +650,7 @@ function R.Report()
         .."\nSCENERY_COUNT="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.count)
         .."\nSCENERY_ERROR="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.error)
         .."\nLOADING_UI_DRIVER="..g.tostring(loadingDiagnostics.driver)
+        .."\nLOADING_UI_CAPTURED="..g.tostring(loadingDiagnostics.captured or 0)
         .."\nLOADING_UI_WORLD_TICKS="..g.tostring(loadingDiagnostics.worldTicks or 0)
         .."\nLOADING_UI_TICKS="..g.tostring(loadingDiagnostics.ticks or 0)
         .."\nLOADING_UI_ROUTED="..g.tostring(loadingDiagnostics.routed)
@@ -678,6 +704,7 @@ function R.Advance(world,expand)
 end
 
 function R.Shutdown(world)
+    world.parkExpansionsParkReady=false
     if current==world then R.LoadingProgress(false,0,"") end
     if world.parkExpansionsHeightEntity then
         api.entity.DestroyEntity(world.parkExpansionsHeightEntity)
@@ -754,6 +781,23 @@ function R.Init()
     local uiHooks=g.require("forgeutils.uihookmanager")
     uiHooks:AddImportHook("HUD","/js/boundarylab/research.js")
     local hooks=g.require("forgeutils.hookmanager")
+    -- Capture the existing view without making native requests from its
+    -- constructor or ready callback. Its own Shutdown invalidates the reference.
+    hooks:AddHook("UI.LoadingScreenUI","new",function(original,...)
+        local wrapper=original(...)
+        if g.type(wrapper)=="table" then
+            loadingViews[wrapper]=true
+            loadingDiagnostics.captured=(loadingDiagnostics.captured or 0)+1
+            loadingDirty=true
+        end
+        return wrapper
+    end)
+    hooks:AddHook("UI.LoadingScreenUI","Shutdown",function(original,self,...)
+        loadingViews[self]=nil
+        loadingWrappers[self]=nil
+        loadingImports[self]=nil
+        return original(self,...)
+    end)
     -- The loading script is not a require() module in this build. Wrap the
     -- live game environment instead: BaseGame.AdvancePreWorld calls this
     -- instance's OnPhase dynamically, outside the park-loading coroutine.
@@ -778,7 +822,7 @@ function R.Init()
     end
     hooks:AddHook("UI.GamefaceUIWrapper","_OnReadyCallback",function(original,self,...)
         local result=original(self,...)
-        if self.tInitSettings.sViewName=="HUD" and not wrappers[self] then
+        if self.tInitSettings and self.tInitSettings.sViewName=="HUD" and not wrappers[self] then
             wrappers[self]=true
             self:AddEventListener("BoundaryLab_RequestState",0,R.Push,nil)
             self:AddEventListener("BoundaryLab_Purchase",2,R.Request,nil)
@@ -788,7 +832,9 @@ function R.Init()
     end)
     hooks:AddHook("UI.GamefaceUIWrapper","Shutdown",function(original,self,...)
         wrappers[self]=nil
+        loadingViews[self]=nil
         loadingWrappers[self]=nil
+        loadingImports[self]=nil
         return original(self,...)
     end)
 end
