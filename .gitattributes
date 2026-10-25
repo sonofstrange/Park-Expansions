@@ -1,0 +1,10 @@
+* text=auto
+*.bin binary
+*.trn binary
+*.ovl binary
+*.dll binary
+*.exe binary
+*.zip binary
+*.png binary
+*.ppuipkg binary
+work/boundarylab/Mod_BoundaryLab/** -text -diff

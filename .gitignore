@@ -1,0 +1,11 @@
+work/cobra-tools/
+__pycache__/
+*.pyc
+*.obj
+*.lib
+*.exp
+*.pdb
+build/
+dist/
+*.park2
+**/AutoConversion/

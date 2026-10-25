@@ -1,0 +1,66 @@
+.BL_panel { flex:1 0 0; min-width:0; min-height:0; max-width:105rem; box-sizing:border-box; overflow:hidden; padding:0.7rem 1rem; color:#064766; display:flex; flex-direction:column; }
+.BL_header { display:flex; justify-content:space-between; align-items:center; flex-shrink:0; margin-bottom:0.45rem; }
+.BL_header h1 { font-size:1.3rem; margin:0; }
+.BL_report.Button_root { min-width:8rem; height:2.1rem; }
+.BL_report .Button_label { font-size:0.8rem; }
+.BL_status { font-size:0.8rem; min-height:1.3rem; margin-bottom:0.3rem; }
+.BL_status.success { color:#14935a; }
+.BL_unavailable { font-size:0.8rem; margin-bottom:0.6rem; }
+.BL_workspace { display:flex; flex:1; min-height:0; min-width:0; }
+.BL_tree { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; background-color:#fff; border-radius:0.55rem; overflow:hidden; }
+.BL_treeHeader { display:flex; justify-content:space-between; align-items:center; padding:1rem 1.3rem; border-bottom:0.1rem solid #e7f1f7; font-size:1.05rem; font-weight:bold; flex-shrink:0; }
+.BL_treeHint { font-size:0.75rem; font-weight:normal; color:#688c9f; margin-left:1rem; }
+.BL_treeScroll { flex:1; min-height:0; width:100%; }
+.BL_treeContent { width:100%; }
+.BL_columns { display:flex; padding:1.1rem 0.8rem 1.5rem; width:100%; }
+.BL_branch { flex:1; min-width:0; margin:0 0.7rem; display:flex; flex-direction:column; align-items:center; }
+.BL_branchHeading { width:100%; max-width:23rem; padding:0 0.2rem 0.9rem; display:flex; align-items:center; justify-content:space-between; }
+.BL_branchTitle { font-size:1.05rem; font-weight:bold; }
+.BL_branchCount { font-size:0.7rem; color:#7493a3; margin-left:0.5rem; }
+.BL_stage { width:100%; max-width:23rem; display:flex; flex-direction:column; align-items:center; }
+.BL_link { width:0.18rem; height:1.1rem; background-color:#b3cddb; flex-shrink:0; }
+.BL_link.complete { background-color:#87d5b0; }
+.BL_node.Button_root { width:100%; min-width:0; height:4.5rem; border-radius:0.5rem; border:0.1rem solid #b6cedd; border-bottom-width:0.18rem; background-color:#f8fcff; background-image:none; color:#14516e; padding:0.7rem 0.85rem; box-shadow:none; }
+.BL_node .Button_labelContainer { align-items:flex-start; text-align:left; flex:1; min-width:0; }
+.BL_node .Button_label { font-size:1.05rem; font-weight:bold; white-space:nowrap; color:inherit; }
+.BL_node .Button_subLabel { font-size:0.7rem; margin-top:0.3rem; color:#6d8b9c; }
+.BL_node .Button_icon { width:1.35rem; height:1.35rem; margin-right:0.7rem; }
+.BL_node.available { background-color:#e6f6ff; border-color:#55b2d9; }
+.BL_node.locked { background-color:#edf3f6; border-color:#d2e0e8; color:#7e9aa8; }
+.BL_node.purchased { background-color:#9de6c3; border-color:#83cba8; color:#075d49; }
+.BL_node.purchased .Button_subLabel { color:#287c64; }
+.BL_node.selected { border-color:#008fca; box-shadow:0 0 0 0.15rem #008fca; }
+.BL_node.hover, .BL_node.focused { border-color:#008fca; box-shadow:0 0 0 0.15rem #f4c946; background-image:none; }
+.BL_details { width:29rem; flex-shrink:0; margin-left:0.8rem; display:flex; flex-direction:column; min-height:0; }
+.BL_points { display:flex; justify-content:space-between; align-items:center; background-color:#003950; color:#fff; border-radius:0.5rem; padding:0.8rem; font-size:1.05rem; font-weight:bold; flex-shrink:0; margin-bottom:0.5rem; }
+.BL_balance { display:flex; align-items:center; background-color:#fff; color:#06769a; border-radius:1.5rem; padding:0.25rem 0.75rem; margin-left:0.8rem; min-width:5.7rem; justify-content:space-between; }
+.BL_pointsIcon { filter:var(--accentText-filter); width:1.2rem; height:1.2rem; margin-right:0.6rem; }
+.BL_info { display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; border-radius:0.5rem; background-color:#008fc6; color:#fff; }
+.BL_infoHeader { text-align:center; padding:1.1rem 0.8rem 0.85rem; }
+.BL_infoHeader h2 { color:#ffffff; text-transform:none; font-size:1.4rem; margin:0.35rem 0 0.6rem; }
+.BL_badge { display:inline-block; font-size:0.7rem; border:0.08rem solid #90d9ef; border-radius:1rem; padding:0.2rem 0.75rem; color:#e5f8ff; }
+.BL_badge.complete { background-color:#a1e6c3; border-color:#a1e6c3; color:#075d49; }
+.BL_infoBody { background-color:#007aaa; margin:0 0.6rem 0.6rem; padding:1rem; border-radius:0.45rem; flex:1; }
+.BL_preview { height:5.4rem; margin-bottom:0.8rem; position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; background-color:#00658f; border-radius:0.4rem; overflow:hidden; }
+.BL_previewValue { color:#ffffff; font-size:1.4rem; font-weight:bold; margin-top:0.5rem; }
+.BL_limitRow { display:flex; align-items:center; justify-content:space-between; padding:0.65rem 0; border-top:0.05rem solid #399cc1; font-size:0.8rem; }
+.BL_limitRow span { color:#bde6f5; }
+.BL_limitRow strong { color:#ffffff; font-size:0.9rem; margin-left:0.5rem; }
+.BL_limitRow.target strong { color:#c4f6db; }
+.BL_requirement { font-size:0.75rem; line-height:1.1rem; min-height:2.2rem; padding:0.75rem 0; color:#d7f1fa; }
+.BL_researchAction.Button_root { width:100%; min-width:0; min-height:2.4rem; }
+.BL_researchAction .Button_label { font-size:0.8rem; }
+.BL_detailNote { font-size:0.65rem; line-height:1rem; color:#b8e4f3; margin:0.8rem 0 0; }
+.BL_manual { display:flex; flex:1; flex-direction:column; align-items:center; justify-content:center; background-color:#fff; border-radius:0.55rem; padding:2rem; text-align:center; }
+.BL_manual h2 { font-size:1.9rem; margin:0.6rem 0 0.8rem; }
+.BL_manual p { max-width:39rem; font-size:0.9rem; line-height:1.4rem; color:#618396; }
+.BL_manualLimits { display:flex; margin:1rem 0; }
+.BL_manualMetric { display:flex; flex-direction:column; background-color:#edf7fc; border-radius:0.5rem; padding:1.3rem 2rem; margin:0 0.5rem; }
+.BL_manualMetric span { font-size:0.7rem; color:#6993a7; margin-bottom:0.6rem; }
+.BL_manualMetric strong { color:#064766; font-size:1.5rem; }
+.BL_warning { background-color:#fff3d3; color:#886511; border-radius:0.4rem; padding:0.8rem 1rem; font-size:0.8rem; max-width:42rem; }
+.BL_progress { position:absolute; top:12%; left:28%; width:44%; padding:18px; border-radius:12px; background-color:#f4fbff; border:2px solid #19a2d4; color:#075476; pointer-events:none; z-index:10000; }
+.BL_progressText { font-size:21px; margin-bottom:12px; text-align:center; }
+.BL_progressTrack { height:16px; background-color:#d0e3ed; border-radius:8px; overflow:hidden; }
+.BL_progressFill { height:100%; background-color:#0095cf; border-radius:8px; }
+.BL_previewLabel { font-size:0.8rem; color:#d7f1fa; }
