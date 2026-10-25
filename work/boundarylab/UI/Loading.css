@@ -1,4 +1,4 @@
-.PE_loading { position:absolute; left:50%; bottom:7rem; transform:translateX(-50%); width:36rem; max-width:80%; padding:1rem 1.3rem; border-radius:0.65rem; background-color:#f4fbff; color:#064766; pointer-events:none; z-index:100; }
+.PE_loading { position:absolute; left:50%; top:3rem; transform:translateX(-50%); width:36rem; max-width:80%; padding:1rem 1.3rem; border-radius:0.65rem; background-color:#f4fbff; color:#064766; pointer-events:none; z-index:100; }
 .PE_loadingTitle { font-size:1rem; font-weight:bold; margin-bottom:0.6rem; }
 .PE_loadingRow { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.65rem; font-size:0.85rem; }
 .PE_loadingLabel { margin-right:1rem; }

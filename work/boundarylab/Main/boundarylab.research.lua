@@ -604,7 +604,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.41 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.42 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
