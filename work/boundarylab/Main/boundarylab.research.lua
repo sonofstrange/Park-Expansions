@@ -5,6 +5,8 @@ local api = g.api
 local R = {Widths={1152,1344,1536,1792,2040}, Heights={400,700,1000,1500,2048}, Costs={12500,25000,50000,100000,200000}}
 local wrappers = g.setmetatable({}, {__mode="k"})
 local current
+local loadingWrappers=g.setmetatable({}, {__mode="k"})
+local loadingState={active=false,percent=0,message=""}
 
 local function contours(world,template)
     local s=world.boundaryLabResearch
@@ -65,6 +67,29 @@ local function jsonString(value)
     return '"'..g.tostring(value):gsub('[%z\1-\31\\"]',function(char)
         return g.string.format('\\u%04x',g.string.byte(char))
     end)..'"'
+end
+
+local function pushLoading()
+    local payload="["..g.tostring(loadingState.active)..","..g.tostring(loadingState.percent)..","..jsonString(loadingState.message).."]"
+    for wrapper in g.pairs(loadingWrappers) do
+        if wrapper:IsReady() then
+            g.pcall(function() wrapper:TriggerEventAtNextAdvance("ParkExpansions_LoadProgress",payload) end)
+        end
+    end
+end
+function R.LoadingProgress(active,percent,message)
+    percent=g.tonumber(percent) or 0
+    percent=g.math.max(0,g.math.min(100,g.math.floor(percent)))
+    message=g.tostring(message or "")
+    if loadingState.active==active and loadingState.percent==percent and loadingState.message==message then return end
+    loadingState={active=active==true,percent=percent,message=message}
+    pushLoading()
+end
+local function attachLoading(wrapper)
+    if loadingWrappers[wrapper] then return end
+    loadingWrappers[wrapper]=true
+    wrapper:AddEventListener("ParkExpansions_RequestLoadProgress",0,pushLoading,nil)
+    pushLoading()
 end
 
 function R.Push()
@@ -170,6 +195,7 @@ function R.PrepareMap(world)
     end
     if not biome or preparedMaps[biome] then return true end
     local function fail(message)
+        R.LoadingProgress(false,0,"")
         world.parkExpansionsMapFailed=true
         world.parkExpansionsAutoError=g.tostring(message)
         return false
@@ -188,7 +214,8 @@ function R.PrepareMap(world)
         local ok,value=g.pcall(chunk)
         if ok and g.type(value)=="table" then return value end
     end
-    local ok,errorMessage=g.pcall(begin,"__prepare_map__","",biome,nonce)
+    R.LoadingProgress(true,0,"Preparing terrain…")
+    local ok,errorMessage=g.pcall(begin,"__prepare_map__","Terrain preparation",biome,nonce)
     if not ok then return fail(errorMessage) end
     local bridge=read(base.."BridgeInfo.lua")
     if not bridge or bridge.version~=32 or bridge.supported~=true then
@@ -210,12 +237,14 @@ function R.PrepareMap(world)
             local expected=biome:sub(1,1):upper()..biome:sub(2).."Sandbox.bin"
             if result.filename~=expected then return fail("Prepared terrain response did not validate.") end
             preparedMaps[biome]=true
+            R.LoadingProgress(false,100,"Terrain ready")
             world.boundaryLabProgress=0
             return true
         elseif result and result.status=="error" then return fail(result.message)
         elseif result then
             world.boundaryLabProgress=result.progress or 0
-            world.boundaryLabMessage=result.message or "Preparing terrainвЂ¦"
+            world.boundaryLabMessage=result.message or "Preparing terrain…"
+            R.LoadingProgress(true,result.progress,world.boundaryLabMessage)
         end
         g.coroutine.yield()
     end
@@ -237,6 +266,7 @@ function R.AutoConvert(world)
     local biome=g.tostring(save.sGeome):lower()
     if (mode~="sandbox" and mode~="challenge") or not biomes[biome] then return end
     local function fail(message)
+        R.LoadingProgress(false,0,"")
         world.parkExpansionsAutoError=g.tostring(message)
         world.boundaryLabProgress=0
     end
@@ -257,6 +287,7 @@ function R.AutoConvert(world)
         local success,value=g.pcall(chunk)
         if success and g.type(value)=="table" then return value end
     end
+    R.LoadingProgress(true,0,"Preparing park…")
     local started,errorMessage=g.pcall(begin,g.tostring(api.save.GetSaveIdentifier(request.cSaveToken)),
         g.tostring(metadata.sName or save.sParkName or ""),biome,nonce)
     if not started then fail(errorMessage);return end
@@ -291,10 +322,12 @@ function R.AutoConvert(world)
             manager.tLoadParkFromSaveTokenRequest=nil
             manager.cLastActiveParkSaveToken=nil
             world.parkExpansionsAutoInfo=result.info
+            R.LoadingProgress(false,100,"Park conversion successful.")
             world.parkExpansionsAutoStatus="Park conversion successful."
             world.boundaryLabProgress=0
             return
         elseif result and result.status=="skip" then
+            R.LoadingProgress(false,100,"")
             return
         elseif result and result.status=="error" then
             fail(result.message);return
@@ -302,7 +335,8 @@ function R.AutoConvert(world)
             -- Native park APIs and the new HUD are not ready yet. Keep load
             -- progress here without querying points or advancing a HUD wrapper.
             world.boundaryLabProgress=result.progress or 0
-            world.boundaryLabMessage=result.message or "Converting existing parkРІР‚В¦"
+            world.boundaryLabMessage=result.message or "Converting existing park…"
+            R.LoadingProgress(true,result.progress,world.boundaryLabMessage)
         end
         g.coroutine.yield()
     end
@@ -350,13 +384,16 @@ function R.BeforeLoad(world)
     local mapOK,mapResult=g.pcall(R.PrepareMap,world)
     if not mapOK or mapResult==false then
         world.parkExpansionsMapFailed=true
+        R.LoadingProgress(false,0,"")
         world.parkExpansionsAutoError=world.parkExpansionsAutoError or g.tostring(mapResult)
-        -- Do not send partially prepared terrain to the native loader.
-        g.error("Park Expansions: "..world.parkExpansionsAutoError,0)
+        -- Never throw before CPTWorld.OnLoad has initialized its managers.
+        -- A fresh park can safely fall back to its original unexpanded template.
     end
-    local autoOK,autoError=g.pcall(R.AutoConvert,world)
-    if not autoOK then world.parkExpansionsAutoError="Automatic conversion failed: "..g.tostring(autoError) end
-    R.ReadConvertedSave(world)
+    if not world.parkExpansionsMapFailed then
+        local autoOK,autoError=g.pcall(R.AutoConvert,world)
+        if not autoOK then R.LoadingProgress(false,0,"");world.parkExpansionsAutoError="Automatic conversion failed: "..g.tostring(autoError) end
+        R.ReadConvertedSave(world)
+    end
     state(world)
     local serial=api.world.GetWorldAPIs().worldserialisation
     if not serial or world.boundaryLabRegistered then return end
@@ -382,6 +419,13 @@ end
 function R.AfterLoad(world,templates)
     local s=state(world)
     local converted=world.parkExpansionsConverted
+    if world.parkExpansionsMapFailed then
+        s.managed=false
+        world.parkExpansionsUnsupportedReason=world.parkExpansionsAutoError
+        world.boundaryLabMessage=world.parkExpansionsAutoError
+        R.Push()
+        return
+    end
     if not s.managed and converted then
         local template=templates[("/run/parks/sandbox/"..converted.filename):lower()]
         local terrain=api.world.GetWorldAPIs().voxelterrain
@@ -500,7 +544,7 @@ function R.Request(branch,level)
     world.boundaryLabRecovering=nil
     world.boundaryLabProgress=0
     world.boundaryLabCommitResult=nil
-    R.Progress(world,1,"Preparing expansionРІР‚В¦")
+    R.Progress(world,1,"Preparing expansion…")
     world.boundaryLabQueued=true
 end
 
@@ -515,7 +559,7 @@ function R.QueueManual(world)
     world.boundaryLabRecovering=nil
     world.boundaryLabProgress=0
     world.boundaryLabCommitResult=nil
-    world.boundaryLabMessage="Applying configured park limitsРІР‚В¦"
+    world.boundaryLabMessage="Applying configured park limits…"
     world.boundaryLabQueued=true
 end
 
@@ -527,7 +571,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.36 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.37 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
@@ -567,7 +611,7 @@ function R.Advance(world,expand)
                     world.boundaryLabCommitResult={seed=s.seed,bounds=bounds}
                 else expand(world,p.size,true) end
                 g.assert(world.boundaryLabCommitResult,"Configured boundary was not applied")
-                R.Progress(world,98,"Applying configured heightРІР‚В¦")
+                R.Progress(world,98,"Applying configured height…")
                 g.coroutine.yield()
                 R.ApplyHeight(world,nil,p.maximum)
                 R.Finish(world,true)
@@ -575,10 +619,10 @@ function R.Advance(world,expand)
                 expand(world,R.Widths[p.level])
                 R.Finish(world,world.boundaryLabCommitResult~=nil,"Boundary rejected. Research points refunded.")
             else
-                R.Progress(world,40,"Applying height upgradeРІР‚В¦")
+                R.Progress(world,40,"Applying height upgrade…")
                 g.coroutine.yield()
                 R.ApplyHeight(world,p.level)
-                R.Progress(world,90,"Finishing upgradeРІР‚В¦")
+                R.Progress(world,90,"Finishing upgrade…")
                 g.coroutine.yield()
                 R.Finish(world,true)
             end
@@ -589,6 +633,7 @@ function R.Advance(world,expand)
 end
 
 function R.Shutdown(world)
+    if current==world then R.LoadingProgress(false,0,"") end
     if world.parkExpansionsHeightEntity then
         api.entity.DestroyEntity(world.parkExpansionsHeightEntity)
         world.parkExpansionsHeightEntity=nil
@@ -661,11 +706,19 @@ end
 
 function R.Init()
     api.ui2.MapResources("BoundaryLabUI")
-    g.require("forgeutils.uihookmanager"):AddImportHook("HUD","/js/boundarylab/research.js")
+    local uiHooks=g.require("forgeutils.uihookmanager")
+    uiHooks:AddImportHook("HUD","/js/boundarylab/research.js")
+    uiHooks:AddImportHook("LoadingScreen","/js/boundarylab/loading.js")
+    -- The persistent loading view may already be ready when this mod initializes.
+    local existing=api.forgeutils and api.forgeutils.uiHookManagerState
+    for wrapper,view in g.pairs(existing and existing.wrappers or {}) do
+        if view=="LoadingScreen" and wrapper:IsReady() then attachLoading(wrapper) end
+    end
     -- Forge's hook manager also handles a UI wrapper loaded before this mod.
     local hooks=g.require("forgeutils.hookmanager")
     hooks:AddHook("UI.GamefaceUIWrapper","_OnReadyCallback",function(original,self,...)
         local result=original(self,...)
+        if self.tInitSettings.sViewName=="LoadingScreen" then attachLoading(self) end
         if self.tInitSettings.sViewName=="HUD" and not wrappers[self] then
             wrappers[self]=true
             self:AddEventListener("BoundaryLab_RequestState",0,R.Push,nil)
@@ -676,6 +729,7 @@ function R.Init()
     end)
     hooks:AddHook("UI.GamefaceUIWrapper","Shutdown",function(original,self,...)
         wrappers[self]=nil
+        loadingWrappers[self]=nil
         return original(self,...)
     end)
 end

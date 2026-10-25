@@ -2,7 +2,7 @@ local realLoadfile=loadfile
 local realRequire=require
 local realLoadlib=package.loadlib
 local oldApi=api
-local request,states,metadata,beginCalls,yields
+local request,states,metadata,beginCalls,yields,loadingProgress
 api={save={GetSaveMetadata=function(token) assert(token=='old-token');return metadata end,
  GetSaveIdentifier=function(token)assert(token=='old-token');return '1733AD85' end,
  IsSaveToken=function()return true end}}
@@ -11,7 +11,8 @@ local info={version=1,filename='TropicalSandbox.bin',seed={1,2,3},bounds={-500,5
 local native='/run/Win64/ovldata/Mod_BoundaryLab/AutoConversion/'..string.rep('a',64)..'.bin'
 local function reset()
  metadata={sName='Old Park',tSave={sGameMode='challenge',sGeome='tropical'}}
- beginCalls=0;yields=0
+ beginCalls=0;yields=0;loadingProgress={}
+ R.LoadingProgress=function(active,percent,message)loadingProgress[#loadingProgress+1]={active,percent,message}end
  states={{status='working',progress=20},{status='ready',native=native,info=info}}
  package.loadlib=function(path,symbol)
   assert(path:find('ParkExpansionsBridge.dll',1,true) and symbol=='Begin')
@@ -46,6 +47,7 @@ end
 local world=reset();run(world)
 local manager=world.parkLoadSaveManager
 assert(beginCalls==1 and yields==1)
+assert(loadingProgress[2][1] and loadingProgress[2][2]==20,"Conversion progress did not reach loading view")
 assert(manager.tLoadParkFromSaveTokenRequest==nil and manager.cLastActiveParkSaveToken==nil)
 assert(manager.tLoadParkFromFileRequest.sFileName==native)
 R.ReadConvertedSave(world)

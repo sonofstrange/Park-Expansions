@@ -136,7 +136,8 @@ def main():
         progress(1,'Finding the selected local save')
         if args.biome.casefold() not in BIOMES: raise ValueError('Unsupported park biome')
         # Lua prepares the map before conversion. Validate the same cache here.
-        ensure_maps(mod,args.biome,lambda percent,message: None)
+        ensure_maps(mod,args.biome,lambda percent,message: progress(round(percent*0.6),message))
+        progress(61,"Finding the selected local save")
         source=find_source(saved_games(),args.identifier,args.name,args.biome)
         _,original_records=read_archive(source)
         original_data=next(d for i,d in original_records if i.filename=='parkdata')
@@ -144,7 +145,7 @@ def main():
         if any(b[0]=='BoundaryLabResearch' for b in clients(original_data)[3]):
             write_state(state,status='skip',progress=0,message='Existing Park Expansions world data retained.')
             return 0
-        write_state(state,**prepare(source,mod,progress))
+        write_state(state,**prepare(source,mod,lambda percent,message: progress(60+round(percent*0.4),message)))
     except Exception as error:
         message=str(error)
         if isinstance(error,OSError):

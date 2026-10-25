@@ -10,7 +10,7 @@ local function test(label,options)
  local request={sFileName=input,sTerrainFileName=input:gsub("%.bin$",".trn")}
  local manager={tLoadParkFromFileRequest=request}
  if options.saved then manager.tLoadParkFromFileRequest=nil;manager.tLoadParkFromSaveTokenRequest={} end
- local eligible=not options.unsupported and not options.saved
+ local eligible=not options.unsupported and not options.saved and not options.mapFail
  local report,noticeCount,loaded= nil,0,0
  local w={editors={CopyToClipboard=function(_,text) report=text end},voxelterrain={
   GetPrimaryVoxelTerrainEntityID=function() return 11 end,
@@ -39,7 +39,7 @@ local function test(label,options)
  require=function(name)
   if name=="boundarylab.research" then
    return {Progress=function() end,Finish=function() end,AddUIHooks=function() end,Advance=function() end,
-    BeforeLoad=function() end,AfterLoad=function() end}
+    BeforeLoad=function(world)world.parkExpansionsMapFailed=options.mapFail end,AfterLoad=function() end}
   end
   if name=="Vector3" then return V end
   if name=="Helpers.PopUpDialogUtils" then return {RunOKDialog=function() noticeCount=noticeCount+1 end} end
@@ -85,3 +85,5 @@ test("unexpected height prevents contour expansion",{shortHeight=true})
 test("missing outer ground prevents contour expansion",{badGround=true})
 test("non-flat transition at x600 is accepted",{slopedGround=true})
 test("missing stock validation file prevents boundary edit",{missingChecks=true})
+
+test("preparation failure loads original park without partially initialized teardown",{mapFail=true})

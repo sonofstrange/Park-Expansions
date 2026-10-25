@@ -14,7 +14,7 @@ api={world={GetWorldAPIs=function()return w end},ui2={MapResources=function(name
 local originalRequire=require
 require=function(name)
     if name=="forgeutils.uihookmanager" then return {AddImportHook=function(_,view,path)
-        assert(view=="HUD" and path=="/js/boundarylab/research.js")end}end
+        assert((view=="HUD" and path=="/js/boundarylab/research.js") or (view=="LoadingScreen" and path=="/js/boundarylab/loading.js"))end}end
     if name=="forgeutils.hookmanager" then return {AddHook=function(_,module,name,fn)
         assert(module=="UI.GamefaceUIWrapper");hooks[name]=fn end}end
     return originalRequire(name)
@@ -28,7 +28,7 @@ listeners.BoundaryLab_RequestState.callback()
 assert(captured:sub(1,1)=="[")
 local world={}
 R.BeforeLoad(world)
-R.Progress(world,17.25,'Quote " and slash \\ and newline\ncontrol\1 and С‚РµРєСЃС‚')
+R.Progress(world,17.25,'Quote " and slash \\ and newline\ncontrol\1 and текст')
 local file=assert(io.open('work/bridge-payload.json','wb'));file:write(captured);file:close()
 hooks.Shutdown(function()end,wrapper)
 captured=nil;R.Push();assert(captured==nil,"Retained a destroyed HUD wrapper")

@@ -124,6 +124,11 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
 
 #ifdef BRIDGE_TEST
 #include <cassert>
+extern "C" __declspec(dllexport) int TestArgumentContract(void* state) {
+    char value[4096];
+    for(int index=1; index<=4; ++index) if(!readArgument(state,index,value,sizeof(value))) return 0;
+    return 1;
+}
 int main() {
     unsigned char state[64]{},ci[32]{},stack[24*5]{},text[600]{};
     *reinterpret_cast<void**>(state+0x20)=ci;

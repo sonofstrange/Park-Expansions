@@ -4,7 +4,7 @@
 
 Expand your park through two research branches: park size and building height. Each branch has five upgrades.
 
-- Buildable area up to **2040 Г— 2040 m**, within a 2048 Г— 2048 m terrain volume.
+- Buildable area up to **2040 × 2040 m**, within a 2048 × 2048 m terrain volume.
 - Building ceiling up to **world Y = 2048 m**. Individual ride limits may differ.
 - Original landscape retained, with surrounding landscape made editable.
 - Automatic conversion of supported existing local Sandbox and Challenge parks.
@@ -14,11 +14,11 @@ Expand your park through two research branches: park size and building height. E
 
 Download the mod ZIP from [Releases](../../releases). Close the game, install **ACSE** and **ForgeUtils**, then extract the complete `Mod_BoundaryLab` folder into `Planet Coaster 2/Win64/ovldata/`.
 
-Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open **Research в†’ Park Expansions** in the game.
+Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open **Research → Park Expansions** in the game.
 
 ## Compatibility
 
-Development version **0.36-test**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
+Development version **0.37-test**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
 
 The maximum tested buildable width is 2040 m, leaving a 4 m margin at each terrain edge. Setting 4096 in the config does not generate a larger terrain.
 
@@ -46,7 +46,7 @@ See [BUILD.md](BUILD.md) for build steps and [REVIEW.md](REVIEW.md) for the exec
 
 This repository does not grant a new license for Frontier assets or bundled third-party components. Their respective owners' terms apply; bundled Python and PyInstaller notices are retained.
 
-## 0.36 development: smaller download
+## 0.37 development: smaller download and loading progress
 
 The test package is approximately **22.3 MiB**, compared with 136.6 MiB for 0.35. It contains no prepared map payloads. When a supported biome is first used, the bundled worker reads that biome's original Sandbox `.bin`, `.trn` and `.bakedHeightMap` from the installed game and creates the expanded map pair under the mod's `Maps` directory. No download is needed, and the game's original files are read-only inputs.
 
@@ -55,3 +55,12 @@ Only the selected biome is prepared. In local automated checks, a cold generatio
 All four generated map pairs matched the 0.35 release **byte for byte**. The standalone frozen worker and Lua preparation logic passed automated tests. In-game loading of this new flow is awaiting manual confirmation. The 0.35 public release remains unchanged.
 
 Terrain is still **2048 × 2048 m** with **2040 × 2040 m** tested buildable space. This change does not enable 4096 × 4096 m; the native raster-size limitation remains.
+
+### 0.37 fixes
+
+- A nonempty map-preparation label now satisfies the native bridge argument contract. The empty label in 0.36 was rejected before the worker could start.
+- A rejected preparation request no longer raises an error before the base world has initialized. A fresh park falls back to its original template with expansion unavailable.
+- Terrain preparation and old-save conversion publish live progress to the existing LoadingScreen view. The overlay shows the worker's percentage and current step, then hides when the operation finishes or the loading screen closes.
+- The loading overlay uses a separate one-string event payload and never queries park APIs before they are ready. Existing research and HUD behavior is unchanged.
+
+The small package remains a test build pending manual game confirmation. The public 0.35 release is unchanged.

@@ -1,18 +1,22 @@
 local nativeLoadfile=loadfile
 local function test(kind)
  local calls,yields=0,0
+ local progress={}
  api={save={GetSaveMetadata=function()return{tSave={sGameMode="sandbox",sGeome="taiga",parkExpansions=kind=="converted" and {} or nil}}end}}
  local R=assert(nativeLoadfile('work/boundarylab/Main/boundarylab.research.lua'))()
+ R.LoadingProgress=function(active,percent,message)progress[#progress+1]={active,percent,message}end
  package.loadlib=function(path,symbol)
   assert(symbol=="Begin")
   return function(identifier,name,biome,nonce)
-   calls=calls+1;assert(identifier=="__prepare_map__" and name=="" and biome=="taiga")
+   for _,value in ipairs({identifier,name,biome,nonce})do assert(type(value)=="string" and #value>0,"Native bridge rejects empty arguments")end
+   calls=calls+1;assert(identifier=="__prepare_map__" and name=="Terrain preparation" and biome=="taiga")
   end
  end
  loadfile=function(path,mode,env)
   assert(mode=="t" and type(env)=="table")
   if path:find("BridgeInfo",1,true)then return function()return{version=32,supported=true}end end
   if path:find("State-",1,true)then return function()return{status="working"}end end
+  if path:find("Progress-",1,true)then return function()return{status="working",progress=37,message="Reading terrain"}end end
   if path:find("Result-",1,true)then
    if yields==0 then return nil end
    return function()
@@ -37,9 +41,23 @@ local function test(kind)
  elseif kind=="failure"or kind=="invalid"then assert(result==false and world.parkExpansionsMapFailed)
  else
   assert(calls==1 and yields==1 and result==true)
+  assert(progress[2][1]==true and progress[2][2]==37 and progress[2][3]=="Reading terrain","Worker progress was not sent to loading view")
   assert(R.PrepareMap(world)==true and calls==1,"Session cache launched another worker")
  end
  loadfile=nativeLoadfile
  print("PASS map preparation "..kind)
 end
 for _,kind in ipairs({"fresh","converted","old","unsupported","failure","invalid"})do test(kind)end
+
+local registered=false
+api={world={GetWorldAPIs=function()return{worldserialisation={RegisterWorldSerialisationClient=function()registered=true end}}end}}
+local R=assert(nativeLoadfile('work/boundarylab/Main/boundarylab.research.lua'))()
+R.LoadConfig=function(world)world.parkExpansionsConfig={ResearchEnabled=true}end
+R.PrepareMap=function(world)world.parkExpansionsAutoError="Terrain preparation request was not accepted.";return false end
+R.AutoConvert=function()error("Failed preparation must not start conversion")end
+local world={parkLoadSaveManager={tLoadParkFromFileRequest={sFileName="/run/Parks/Sandbox/TaigaSandbox.bin"}}}
+local ok,message=pcall(R.BeforeLoad,world)
+assert(ok,message);assert(registered and world.parkExpansionsMapFailed)
+R.AfterLoad(world,{})
+assert(world.boundaryLabResearch.managed==false and world.boundaryLabMessage:find("not accepted",1,true))
+print('PASS real BeforeLoad and AfterLoad retain original load on preparation rejection without throwing')

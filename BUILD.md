@@ -1,4 +1,4 @@
-# Building Park Expansions 0.36-test
+# Building Park Expansions 0.37-test
 
 Run commands from the repository root on **64-bit Windows**. Source for every mod-specific compiled component is included. The earlier release terrain files remain checked in as regression references. The small package excludes them and generates its own cache at first use. No game executable or save is needed to compile the DLL or worker.
 
@@ -38,7 +38,7 @@ build\ovl-env\Scripts\python tools/build_ui.py
 build\ovl-env\Scripts\python work/build_boundarylab.py
 ```
 
-The OVL builder syntax-checks Lua, creates a Planet Coaster 2 ZLIB OVL, reloads it, and checks the two Lua files and two embedded UI resources against their sources. Cobra Tools must include its Lua utilities and hash data.
+The OVL builder syntax-checks Lua, creates a Planet Coaster 2 ZLIB OVL, reloads it, and checks the two Lua files and four embedded UI resources against their sources. Cobra Tools must include its Lua utilities and hash data.
 
 ## Tests
 
@@ -60,7 +60,7 @@ The historical numeric suffix in a test filename is not the mod version. Placeme
 python tools/package.py
 ```
 
-Produces `dist/Park-Expansions-0.36-test.zip` with one `Mod_BoundaryLab` folder and no instructions inside. The repository also includes the original release binaries, prepared maps and third-party runtime. Rebuilding with a different toolchain may produce different binary hashes; byte-for-byte reproducibility is not claimed. See `release-manifest.json` for the original release hashes.
+Produces `dist/Park-Expansions-0.37-test.zip` with one `Mod_BoundaryLab` folder and no instructions inside. The repository also includes the original release binaries, prepared maps and third-party runtime. Rebuilding with a different toolchain may produce different binary hashes; byte-for-byte reproducibility is not claimed. See `release-manifest.json` for the original release hashes.
 
 ## Terrain generation integration test
 
@@ -71,3 +71,12 @@ python work/test_map_generation.py --game-dir "PATH_TO_PLANET_COASTER_2" --biome
 ```
 
 The test compares both generated files with the checked-in 0.35 references and checks cache reuse. First-use generation requires the original `Parks/Sandbox` and `TerrainSkirts` assets in the installation. The engine limit is unchanged: the generator deliberately retains the verified 2048 m horizontal extent.
+
+Loading overlay regression checks:
+
+```bat
+node work/test_loading_ui.cjs
+work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_loading_progress.lua
+```
+
+For the real Win64 argument-reader regression, build `bridge.cpp` as a separate DLL with `/DBRIDGE_TEST`, output `build/bridge_contract.dll`, then run `python work/test_native_argument_contract.py`. This test-only DLL is never distributed; the shipped DLL is built without `BRIDGE_TEST`.
