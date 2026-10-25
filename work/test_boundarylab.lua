@@ -176,7 +176,7 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
         if module=="Helpers.PopUpDialogUtils" then
             return {RunOKDialog=function(_,message)
                 popupCount=popupCount+1
-                assert(clipboardReport and clipboardReport:find("Park Expansions 0.45 report",1,true),"Missing clipboard report")
+                assert(clipboardReport and clipboardReport:find("Park Expansions 0.46 report",1,true),"Missing clipboard report")
                 assert(clipboardReport:find("CONNECTED posts="..#posts.." panels="..#panels,1,true),"Missing contour diagnosis")
                 if not allowCommit then assert(message:find("outsideBounds=true",1,true),"Lost rejection details") end
                 if controlAccepted then assert(message:find("Unchanged contour: accepted",1,true),"Lost control result") end

@@ -87,6 +87,31 @@ local function validate(data)
     return count
 end
 
+local function validatePreview(preview)
+    local reasons,allowed
+    for frame=1,600 do
+        allowed=api.undo.CanCommitPreview(preview)
+        reasons=api.undo.GetCommitFailReasons(preview)
+        if allowed==true then return true,reasons end
+        -- Like boundary placement, completion of the undo operation does not
+        -- guarantee that asynchronous constraint checks have settled yet.
+        if frame>=5 and allowed==false and reasons and not reasons.bUnknown then return false,reasons end
+        g.coroutine.yield()
+    end
+    return false,reasons
+end
+
+local function rejectionDetails(reasons)
+    local active={}
+    for key,value in g.pairs(reasons or {}) do
+        if value~=false and value~=nil and value~=0 then
+            active[#active+1]=g.tostring(key).."="..g.tostring(value)
+        end
+    end
+    g.table.sort(active)
+    return #active>0 and g.table.concat(active,", ") or "no active reason flags reported"
+end
+
 function S.AfterLoad(world,progress)
     local state=world.parkExpansionsScenery
     if not state or state.complete then return end
@@ -148,8 +173,11 @@ function S.AfterLoad(world,progress)
             g.assert(preview,"Scenery preview was not created")
             world.parkExpansionsSceneryPreview=preview
             wait(function()return api.undo.IsOperationComplete(busy)end,"Scenery preview timed out")
-            wait(function()return api.undo.CanCommitPreview(preview)~=nil end,"Scenery validation timed out")
-            g.assert(api.undo.CanCommitPreview(preview)==true,"Engine rejected original scenery restoration")
+            local allowed,reasons=validatePreview(preview)
+            state.lastReasons=rejectionDetails(reasons)
+            state.batchFirst=cursor;state.batchLast=last;state.batchResource=placements[cursor].resource
+            g.assert(allowed,"Engine rejected original scenery restoration: "..state.lastReasons..
+                " (objects "..cursor..".."..last..", "..state.batchResource..")")
             local committed=api.undo.CommitPreview(preview)
             preview=nil;world.parkExpansionsSceneryPreview=nil
             -- Native save clients own committed objects. Record the continuation

@@ -19,6 +19,7 @@ local function run(kind)
     local world={boundaryLabTerrainCreated=true,boundaryLabFilename='TaigaSandbox.bin'}
     local batchSize=0
     local previews=0
+    local checks=0
     local hierarchy={SetCashAccumulate=function(_,value)assert(value==false)end,
         CreateNewPart=function(_,name)created=created+1;batchSize=batchSize+1;assert(batchSize<=128,"Unbounded native preview batch");assert(name=='NAT_Tree_Test');return created end,
         StartEditingPart_Scenery=function(_,id)return {SetTransform=function(_,value)placed[id]=value end}end,
@@ -34,7 +35,14 @@ local function run(kind)
         player={GetGameOwner=function()return 1 end},world={GetWorldAPIs=function()return w end},debug={Trace=function()end},
         entity={CreateRequestCompletionToken=function()return 1 end,HaveRequestsCompleted=function()return true end},
         undo={IsBusy=function()return false end,PreviewChangeList=function()previews=previews+1;return 2,3 end,IsOperationComplete=function()return true end,
-            CanCommitPreview=function()return kind~='rejected' and not(kind=='partial' and previews==2)end,
+            CanCommitPreview=function()
+                checks=checks+1
+                return kind~='rejected' and not(kind=='partial' and previews==2) and
+                    not(kind=='pending' and checks<12)
+            end,
+            GetCommitFailReasons=function()
+                return {bUnknown=kind=='pending' and checks<12,bOutsidePark=kind=='rejected'}
+            end,
             CommitPreview=function()commits=commits+1;return 4 end,
             CancelPreview=function()cancels=cancels+1;return 5 end,Checkpoint=function()end}}
     require=function(name)
@@ -59,7 +67,7 @@ local function run(kind)
     end
     if kind=='saved' then loadFn({complete=true,count=2,source=data.source}) end
     restore()
-    if kind=='success' or kind=='batches' then
+    if kind=='success' or kind=='batches' or kind=='pending' then
         assert(commits==math.ceil(expected/128) and created==expected and cancels==0)
         assert(placed[1].position.x==600 and placed[1].position.y==20 and placed[1].orientation.x==0.5)
         assert(world.parkExpansionsScenery.complete and world.parkExpansionsScenery.count==expected)
@@ -77,13 +85,14 @@ local function run(kind)
         assert(world.parkExpansionsScenery.count==260,'Incomplete import did not resume at committed cursor')
     elseif kind=='saved' then assert(created==0 and commits==0)
     elseif kind=='invalid' then assert(created==0 and commits==0 and world.parkExpansionsScenery.error)
-    else assert(commits==0 and cancels==1 and not world.parkExpansionsScenery.complete)end
+    else assert(commits==0 and cancels==1 and not world.parkExpansionsScenery.complete)
+        assert(world.parkExpansionsScenery.error:find('bOutsidePark=true',1,true),'Native rejection reason missing')end
     assert(activated==deactivated,'Park edit constraints were not restored')
     assert(suspended==0,'Save suspension leaked')
     require=nativeRequire;loadfile=nativeLoadfile
     print('PASS scenery '..kind)
 end
-for _,kind in ipairs({'success','saved','invalid','rejected','partial','batches'})do run(kind)end
+for _,kind in ipairs({'pending','success','saved','invalid','rejected','partial','batches'})do run(kind)end
 
 local definitions,parts={},{}
 local builder={}
