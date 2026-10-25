@@ -1,8 +1,8 @@
 {
-  "version": "0.46-test",
-  "archive": "Park-Expansions-0.46-test.zip",
-  "archive_sha256": "575093f715f3b11b6ce20a248c8cafeca5e1c72ff8c84331f5c0c1a1a1c6dda2",
-  "bytes": 23356599,
+  "version": "0.47-test",
+  "archive": "Park-Expansions-0.47-test.zip",
+  "archive_sha256": "b1925d1853391416770336fe906cfa10f8a3b0f4eaed98b4ca9c335f89c87ae3",
+  "bytes": 23356942,
   "file_sha256": {
     "Mod_BoundaryLab/Compatibility/AutoWorker/ParkExpansionsWorker.exe": "8b5e456eac86dba86a76c14e9e828c8513bba734fad8c207aa21d755dbc0b7d1",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/81d243bd2c585b0f4821__mypyc.cp314-win_amd64.pyd": "ab64835b63093c31975df2692756c8008e7ec190e4aa86f15a713bcc62e1d432",
@@ -122,8 +122,8 @@
     "Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll": "6d669fedbec221478fa5253930581ed0ca59d8481f72d2fc913912e98bab0b9f",
     "Mod_BoundaryLab/Compatibility/PyInstaller-COPYING.txt": "dcf75fdb959db1e3b41c0f8505069d2ece781b5ec6b3d0a4d30975cfc6580245",
     "Mod_BoundaryLab/Compatibility/Python-LICENSE.txt": "935cf13e19f8c31b497d20b05d73623431a226b230c3599bc30fa3348979bc68",
-    "Mod_BoundaryLab/Config.ini": "b21496cca0bff8c1a26a6b4096595634ffe2111e5efdf26be68bd7ec40282605",
-    "Mod_BoundaryLab/Main.ovl": "beca61ec4bb83cb660aa66123f26056af1ed5de80265bae924b6588dba04f465",
+    "Mod_BoundaryLab/Config.ini": "8d90ca0cdee16722df127261f4069bec7e2cc3790c2cead6b76f58f2fb021c38",
+    "Mod_BoundaryLab/Main.ovl": "9139cdc0139fcdb052503c20637763b270b69f2b5b57d8c3d0c3a17b1532e99f",
     "Mod_BoundaryLab/Manifest.xml": "43841d0e4785ef45e81079e19687b6c45f2146467aed9c15bd08edaa14fcb24a"
   }
 }

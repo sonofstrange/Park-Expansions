@@ -33,7 +33,8 @@ local function run(kind)
             ActivateParkEditConstraints=function()activated=activated+1 end}}
     api={save={CreateSaveSuspensionControl=function()return {SuspendSave=function()suspended=suspended+1 end,ResumeSave=function()suspended=suspended-1 end}end},
         player={GetGameOwner=function()return 1 end},world={GetWorldAPIs=function()return w end},debug={Trace=function()end},
-        entity={CreateRequestCompletionToken=function()return 1 end,HaveRequestsCompleted=function()return true end},
+        entity={FindPrefab=function(name)return kind~="missing" and name=="NAT_Tree_Test_Game" end,
+            CompilePrefab=function()return nil end,CreateRequestCompletionToken=function()return 1 end,HaveRequestsCompleted=function()return true end},
         undo={IsBusy=function()return false end,PreviewChangeList=function()previews=previews+1;return 2,3 end,IsOperationComplete=function()return true end,
             CanCommitPreview=function()
                 checks=checks+1
@@ -46,6 +47,7 @@ local function run(kind)
             CommitPreview=function()commits=commits+1;return 4 end,
             CancelPreview=function()cancels=cancels+1;return 5 end,Checkpoint=function()end}}
     require=function(name)
+        if name=='NAT_Tree_Test_Game' then return {GetRoot=function()return {}end}end
         if name=='Vector3' then return V end
         if name=='TransformQ' then return {FromOrPos=function(q,p)return {orientation=q,position=p}end}end
         if name=='Quaternion' then return {FromYawPitchRoll=function(v)return v end}end
@@ -84,7 +86,7 @@ local function run(kind)
         assert(commits==3 and created==388 and world.parkExpansionsScenery.complete)
         assert(world.parkExpansionsScenery.count==260,'Incomplete import did not resume at committed cursor')
     elseif kind=='saved' then assert(created==0 and commits==0)
-    elseif kind=='invalid' then assert(created==0 and commits==0 and world.parkExpansionsScenery.error)
+    elseif kind=='invalid' or kind=='missing' then assert(created==0 and commits==0 and world.parkExpansionsScenery.error)
     else assert(commits==0 and cancels==1 and not world.parkExpansionsScenery.complete)
         assert(world.parkExpansionsScenery.error:find('bOutsidePark=true',1,true),'Native rejection reason missing')end
     assert(activated==deactivated,'Park edit constraints were not restored')
@@ -92,7 +94,7 @@ local function run(kind)
     require=nativeRequire;loadfile=nativeLoadfile
     print('PASS scenery '..kind)
 end
-for _,kind in ipairs({'pending','success','saved','invalid','rejected','partial','batches'})do run(kind)end
+for _,kind in ipairs({'pending','success','saved','invalid','missing','rejected','partial','batches'})do run(kind)end
 
 local definitions,parts={},{}
 local builder={}
@@ -118,6 +120,15 @@ for _,part in ipairs(parts)do
     local root=definitions[part.visual]
     assert(root.Prefab:match('_Game$') and root.Components.Model.ModelName:match('_mesh$'))
     assert(root.Components.AssetPackageLoader.PackageNames[1]=='OriginalNaturePackage')
+    local game=definitions[part.visual..'_Game']
+    assert(game.Prefab==root.Prefab and game.Components.Model.ModelName==root.Components.Model.ModelName,
+        'Gameplay alias depends on another custom prefab instead of the stock gameplay parent')
+    for _,name in ipairs({part.visual,part.visual..'_Game'}) do
+        local module=package.loaded[name:lower()]
+        assert(module and module.GetRoot()==definitions[name] and type(module.GetFlattenedRoot)=='function',
+            'Native prefab module boilerplate missing')
+        package.loaded[name:lower()]=nil
+    end
 end
 require=nativeRequire
 print('PASS backdrop-only clusters retain original meshes and packages with editable part definitions')

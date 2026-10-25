@@ -12,6 +12,19 @@ local clusters={
     {"NAT_Bush_Creosote_Flowerless_Cluster_01","NAT_Bush_Creosote_Flowerless_Large_01"},
 }
 
+local function registerPrefab(add,name,root)
+    -- Native prefab resolution also uses Lua modules, including on a later
+    -- rebuild. Match ForgeUtils.PrefabUtility's root/flattened-root contract.
+    local module={GetRoot=function()return root end}
+    module.GetFlattenedRoot=function()
+        local prefab=api.entity.FindPrefab(name)
+        if not prefab and api.entity.CompilePrefab(root,name) then prefab=api.entity.FindPrefab(name) end
+        return prefab
+    end
+    g.package.loaded[name:lower()]=module
+    add(name,root)
+end
+
 function S.AddPrefabs(add)
     for _,entry in g.ipairs(clusters) do
         local source=g.require(entry[1].."_Skirt").GetRoot()
@@ -20,8 +33,10 @@ function S.AddPrefabs(add)
         -- game's interaction/render components so it can be selected and moved.
         local root={Prefab=entry[2].."_Game",Components={
             Model={ModelName=model},AssetPackageLoader=source.Components.AssetPackageLoader}}
-        add("PE_"..entry[1],root)
-        add("PE_"..entry[1].."_Game",{Prefab="PE_"..entry[1]})
+        registerPrefab(add,"PE_"..entry[1],root)
+        -- Both entry points inherit the stock gameplay prefab directly. Avoid
+        -- a second custom inheritance hop during native preview construction.
+        registerPrefab(add,"PE_"..entry[1].."_Game",root)
     end
 end
 
@@ -134,6 +149,12 @@ function S.AfterLoad(world,progress)
         local Quaternion=g.require("Quaternion")
         local placements={}
         for _,group in g.ipairs(data.groups) do
+            local gameplay=group.resource.."_Game"
+            if not api.entity.FindPrefab(gameplay) then
+                local module=g.require(gameplay)
+                g.assert(g.type(module.GetRoot)=="function" and api.entity.CompilePrefab(module.GetRoot(),gameplay)
+                    and api.entity.FindPrefab(gameplay),"Scenery gameplay prefab is unavailable: "..gameplay)
+            end
             for _,row in g.ipairs(group.instances) do
                 placements[#placements+1]={resource=group.resource,row=row}
             end
