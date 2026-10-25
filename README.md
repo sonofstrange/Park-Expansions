@@ -18,7 +18,7 @@ Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open
 
 ## Compatibility
 
-Development version **0.39-test**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
+Development version **0.40-test**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
 
 The maximum tested buildable width is 2040 m, leaving a 4 m margin at each terrain edge. Setting 4096 in the config does not generate a larger terrain.
 
@@ -74,3 +74,7 @@ Copy Report includes loading-page routing, ready and received-progress counters.
 ### 0.39 loading-screen recovery
 
 0.38 caused a startup stall in manual testing and was rolled back. Its replacement loading page is no longer used. 0.39 imports the overlay only from the concrete LoadingScreenUI.Show callback, after the native UI is ready; it does not hook inherited Init or change the page URL. Loading-page acknowledgement counters remain available in Copy Report. The visual result is awaiting manual confirmation. Terrain generation itself was confirmed working in 0.37.
+
+### 0.40: loading-world dispatch
+
+0.39 crashed during manual testing. The new implementation separates the progress producer from native UI calls: park-loading coroutines and JavaScript acknowledgement callbacks only update Lua state. Registration, module import and payload delivery run from LoadingScreenWorld.Advance using that world's live loadingScreenUI reference. It does not change the native loading page or hook UI constructors/Show. The regression test rejects native UI access from a simulated park-load coroutine and validates dispatch from the loading-world tick, callbacks, completion, readiness and teardown. Native in-game confirmation remains pending.

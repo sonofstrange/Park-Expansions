@@ -70,22 +70,17 @@ local function jsonString(value)
     end)..'"'
 end
 
-local function pushLoading()
-    local payload="["..g.tostring(loadingState.active)..","..g.tostring(loadingState.percent)..","..jsonString(loadingState.message).."]"
-    for wrapper in g.pairs(loadingWrappers) do
-        if wrapper:IsReady() then
-            local ok,message=g.pcall(function() wrapper:TriggerEventAtNextAdvance("ParkExpansions_LoadProgress",payload) end)
-            if not ok then loadingDiagnostics.error=g.tostring(message) end
-        end
-    end
-end
+local loadingDirty=true
+local loadingImports=g.setmetatable({}, {__mode="k"})
+-- Called from the park-loading coroutine: update Lua data only. Native UI
+-- requests must be made by the loading world's own Advance callback.
 function R.LoadingProgress(active,percent,message)
     percent=g.tonumber(percent) or 0
     percent=g.math.max(0,g.math.min(100,g.math.floor(percent)))
     message=g.tostring(message or "")
     if loadingState.active==active and loadingState.percent==percent and loadingState.message==message then return end
     loadingState={active=active==true,percent=percent,message=message}
-    pushLoading()
+    loadingDirty=true
 end
 local function attachLoading(wrapper)
     if loadingWrappers[wrapper] then return end
@@ -93,7 +88,7 @@ local function attachLoading(wrapper)
     loadingDiagnostics.views=loadingDiagnostics.views+1
     wrapper:AddEventListener("ParkExpansions_LoadingReady",0,function()
         loadingDiagnostics.ready=loadingDiagnostics.ready+1
-        pushLoading()
+        loadingDirty=true
     end,nil)
     wrapper:AddEventListener("ParkExpansions_LoadingAck",1,function(percent)
         if g.type(percent)=="number" then
@@ -101,8 +96,25 @@ local function attachLoading(wrapper)
             loadingDiagnostics.lastPercent=percent
         end
     end,nil)
-    wrapper:AddEventListener("ParkExpansions_RequestLoadProgress",0,pushLoading,nil)
-    pushLoading()
+    wrapper:AddEventListener("ParkExpansions_RequestLoadProgress",0,function()loadingDirty=true end,nil)
+    loadingDirty=true
+end
+function R.AdvanceLoading(world)
+    loadingDiagnostics.ticks=(loadingDiagnostics.ticks or 0)+1
+    local wrapper=world.loadingScreenUI
+    if not wrapper or not wrapper:IsReady() then return end
+    attachLoading(wrapper)
+    if not loadingImports[wrapper] then
+        wrapper:TriggerEventAtNextAdvance("ForgeUtils_AddImportHook","/js/boundarylab/loading.js")
+        loadingImports[wrapper]=true
+        loadingDiagnostics.routed=loadingDiagnostics.routed+1
+        loadingDirty=true
+    end
+    if loadingDirty then
+        local payload="["..g.tostring(loadingState.active)..","..g.tostring(loadingState.percent)..","..jsonString(loadingState.message).."]"
+        wrapper:TriggerEventAtNextAdvance("ParkExpansions_LoadProgress",payload)
+        loadingDirty=false
+    end
 end
 
 function R.Push()
@@ -584,7 +596,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.39 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.40 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
@@ -601,6 +613,7 @@ function R.Report()
         .."\nMANUAL_HEIGHT="..g.tostring(settings(current).ManualMaxHeight)
         .."\nCONFIG_WARNING="..g.tostring(settings(current).warning)
         .."\nCONFIG_ERROR="..g.tostring(settings(current).error)
+        .."\nLOADING_UI_TICKS="..g.tostring(loadingDiagnostics.ticks or 0)
         .."\nLOADING_UI_ROUTED="..g.tostring(loadingDiagnostics.routed)
         .."\nLOADING_UI_VIEWS="..g.tostring(loadingDiagnostics.views)
         .."\nLOADING_UI_READY="..g.tostring(loadingDiagnostics.ready)
@@ -727,25 +740,17 @@ function R.Init()
     api.ui2.MapResources("BoundaryLabUI")
     local uiHooks=g.require("forgeutils.uihookmanager")
     uiHooks:AddImportHook("HUD","/js/boundarylab/research.js")
-    -- Import from the concrete Show callback, after the native view is ready.
-    -- The persistent loading view may already be ready when this mod initializes.
-    local existing=api.forgeutils and api.forgeutils.uiHookManagerState
-    for wrapper,view in g.pairs(existing and existing.wrappers or {}) do
-        if view=="LoadingScreen" and wrapper:IsReady() then attachLoading(wrapper) end
-    end
-    -- Forge's hook manager also handles a UI wrapper loaded before this mod.
     local hooks=g.require("forgeutils.hookmanager")
-    -- Show is defined on LoadingScreenUI itself. Do not wrap inherited Init,
-    -- replace its HTML address, or alter the loading world's lifecycle.
-    hooks:AddHook("UI.LoadingScreenUI","Show",function(original,self,...)
-        attachLoading(self)
-        self:TriggerEventAtNextAdvance("ForgeUtils_AddImportHook","/js/boundarylab/loading.js")
-        loadingDiagnostics.routed=loadingDiagnostics.routed+1
-        return original(self,...)
+    -- LoadingScreenWorld is active while the park's OnLoad coroutine yields.
+    -- Keep native UI work in that world's context, not in the half-loaded park.
+    hooks:AddHook("LoadingScreenWorld","Advance",function(original,self,...)
+        local result=original(self,...)
+        local ok,message=g.pcall(R.AdvanceLoading,self)
+        if not ok then loadingDiagnostics.error=g.tostring(message) end
+        return result
     end)
     hooks:AddHook("UI.GamefaceUIWrapper","_OnReadyCallback",function(original,self,...)
         local result=original(self,...)
-        if self.tInitSettings.sViewName=="LoadingScreen" then attachLoading(self) end
         if self.tInitSettings.sViewName=="HUD" and not wrappers[self] then
             wrappers[self]=true
             self:AddEventListener("BoundaryLab_RequestState",0,R.Push,nil)
