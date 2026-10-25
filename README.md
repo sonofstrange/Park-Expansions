@@ -92,3 +92,9 @@ A per-save import marker prevents duplicate restoration and preserves subsequent
 ### 0.44: loading callback lifetime fixes
 
 A 0.43 native crash was reported while the park-loading coroutine was still waiting for preparation; the worker had successfully produced the Temperate scenery cache. The overlay now captures the existing LoadingScreenUI instance on creation and invalidates it on shutdown, instead of resolving world scripts from a global environment tick. The capture callback does not register or dispatch UI events. HUD state, purchase and report callbacks cannot access native park APIs until the original park load has finished. The new regression counts attempted native lookups, including attempts hidden by a Lua `pcall`, and tests pending-load callbacks and destroyed loading views. In-game confirmation is pending. Scenery import remains enabled.
+
+### 0.45 test build
+
+The latest 0.44 crash occurs in the native SceneryPreview manager after terrain preparation. This build moves editable backdrop restoration out of OnLoad: it queues after the original OnActivate and advances after the game's default entrance placement. Native previews contain at most 128 parts; each preview and commit completes before another batch starts. A serialized continuation index prevents re-importing committed batches after an interrupted restoration. Saving is suspended during placement and restored on completion, failure or shutdown. Original editable scenery, expansion limits and the terrain-generation loading panel are retained.
+
+Mocked checks cover lifecycle order, editor/entrance waits, bounded previews, continuation after a rejected batch, duplicate prevention and cleanup. The native crash fix still needs in-game validation.

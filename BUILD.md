@@ -87,4 +87,5 @@ Scenery preservation checks (stock archives are read-only):
 ```bat
 python work/test_stock_scenery.py --game-dir "PATH_TO_PLANET_COASTER_2" --cobra-tools work/cobra-tools
 work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_scenery.lua
+lua.exe work/test_scenery_lifecycle.lua
 ```

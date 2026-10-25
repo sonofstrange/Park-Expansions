@@ -43,11 +43,12 @@ function S.BeforeLoad(world)
     serial:RegisterWorldSerialisationClient("ParkExpansionsScenery",1,
         function(save)
             local state=world.parkExpansionsScenery
-            save.complete=state.complete;save.count=state.count;save.source=state.source
+            save.complete=state.complete;save.count=state.count;save.source=state.source;save.nextIndex=state.nextIndex
         end,
         function(load)
-            if load and load.complete==true then
-                world.parkExpansionsScenery={complete=true,count=load.count or 0,source=load.source}
+            if load and (load.complete==true or load.nextIndex) then
+                world.parkExpansionsScenery={complete=load.complete==true,count=load.count or 0,
+                    source=load.source,nextIndex=load.nextIndex}
             end
             return true
         end,
@@ -97,7 +98,7 @@ function S.AfterLoad(world,progress)
     local w=api.world.GetWorldAPIs()
     local a,b=w.voxelterrain:GetWorldBounds(w.voxelterrain:GetPrimaryVoxelTerrainEntityID())
     if a:GetX()~=-1024 or a:GetZ()~=-1024 or b:GetX()~=1023 or b:GetZ()~=1023 then return end
-    local preview,changedConstraints
+    local preview,changedConstraints,saveControl
     local ok,message=g.pcall(function()
         local chunk=g.assert(g.loadfile("Win64/ovldata/Mod_BoundaryLab/Maps/"..
             filename:gsub("%.bin$",".decor.lua"),"t",{}),"Original scenery cache is missing")
@@ -106,50 +107,64 @@ function S.AfterLoad(world,progress)
         local Vector3=g.require("Vector3")
         local TransformQ=g.require("TransformQ")
         local Quaternion=g.require("Quaternion")
-        progress(true,0,"Restoring original scenery…")
-        g.coroutine.yield()
-        -- The restored backdrop ring extends beyond the currently owned plots.
-        -- This runs during loading, before research creates its height ceiling.
-        w.park:DeactivateParkEditConstraints()
-        changedConstraints=true
-        local hierarchy=w.editors:CreateUndoOperationsHierarchy()
-        hierarchy:SetCashAccumulate(false)
-        local token=api.entity.CreateRequestCompletionToken()
-        local created={}
+        local placements={}
         for _,group in g.ipairs(data.groups) do
             for _,row in g.ipairs(group.instances) do
-                created[#created+1]={object=hierarchy:CreateNewPart(group.resource,token),row=row}
-                if #created%100==0 then
-                    progress(true,g.math.floor(#created*40/g.math.max(count,1)),"Restoring scenery: "..#created.."/"..count)
-                    g.coroutine.yield()
-                end
+                placements[#placements+1]={resource=group.resource,row=row}
             end
         end
-        wait(function() return api.entity.HaveRequestsCompleted(token) end,"Scenery assets did not finish loading")
-        for index,entry in g.ipairs(created) do
-            local row=entry.row
-            local edit=hierarchy:StartEditingPart_Scenery(entry.object)
-            edit:SetTransform(TransformQ.FromOrPos(Quaternion.FromYawPitchRoll(Vector3:new(row[4],0,0)),
-                Vector3:new(row[1],row[2],row[3])))
-            if index%100==0 then
-                progress(true,40+g.math.floor(index*40/g.math.max(count,1)),"Positioning original scenery…")
-                g.coroutine.yield()
+        local cursor=state.nextIndex or 1
+        g.assert(g.type(cursor)=="number" and cursor%1==0 and cursor>=1 and cursor<=count+1,
+            "Invalid scenery continuation")
+        g.assert(cursor==1 or state.source==data.source,"Original scenery changed during an incomplete import")
+        saveControl=api.save.CreateSaveSuspensionControl()
+        saveControl:SuspendSave(api.player.GetGameOwner())
+        world.parkExpansionsScenerySaveControl=saveControl
+        -- Native scenery previews belong to the activated park. Submit bounded
+        -- transactions and finish each one before requesting another batch.
+        w.park:DeactivateParkEditConstraints()
+        changedConstraints=true
+        world.parkExpansionsSceneryConstraints=true
+        while cursor<=count do
+            wait(function()return not api.undo.IsBusy() end,"Scenery editor stayed busy")
+            local last=g.math.min(cursor+127,count)
+            local hierarchy=w.editors:CreateUndoOperationsHierarchy()
+            hierarchy:SetCashAccumulate(false)
+            local token=api.entity.CreateRequestCompletionToken()
+            local created={}
+            for index=cursor,last do
+                local entry=placements[index]
+                created[#created+1]={object=hierarchy:CreateNewPart(entry.resource,token),row=entry.row}
             end
+            wait(function()return api.entity.HaveRequestsCompleted(token)end,"Scenery assets did not finish loading")
+            for _,entry in g.ipairs(created) do
+                local row=entry.row
+                local edit=hierarchy:StartEditingPart_Scenery(entry.object)
+                edit:SetTransform(TransformQ.FromOrPos(Quaternion.FromYawPitchRoll(Vector3:new(row[4],0,0)),
+                    Vector3:new(row[1],row[2],row[3])))
+            end
+            local busy
+            busy,preview=api.undo.PreviewChangeList(hierarchy:GetFullUndoChangeList())
+            g.assert(preview,"Scenery preview was not created")
+            world.parkExpansionsSceneryPreview=preview
+            wait(function()return api.undo.IsOperationComplete(busy)end,"Scenery preview timed out")
+            wait(function()return api.undo.CanCommitPreview(preview)~=nil end,"Scenery validation timed out")
+            g.assert(api.undo.CanCommitPreview(preview)==true,"Engine rejected original scenery restoration")
+            local committed=api.undo.CommitPreview(preview)
+            preview=nil;world.parkExpansionsSceneryPreview=nil
+            -- Native save clients own committed objects. Record the continuation
+            -- immediately, so an interrupted import cannot duplicate that batch.
+            cursor=last+1
+            state.nextIndex=cursor;state.count=last;state.source=data.source
+            wait(function()return api.undo.IsOperationComplete(committed)end,"Scenery commit timed out")
+            wait(function()return not api.undo.IsBusy()end,"Scenery commit stayed busy")
+            api.undo.Checkpoint({})
+            progress(true,g.math.floor(last*100/g.math.max(count,1)),"Restoring scenery: "..last.."/"..count)
+            -- Give the native preview manager a full Advance between transactions.
+            g.coroutine.yield()
         end
-        local busy
-        busy,preview=api.undo.PreviewChangeList(hierarchy:GetFullUndoChangeList())
-        g.assert(preview,"Scenery preview was not created")
-        wait(function() return api.undo.IsOperationComplete(busy) end,"Scenery preview timed out")
-        wait(function() return api.undo.CanCommitPreview(preview)~=nil end,"Scenery validation timed out")
-        g.assert(api.undo.CanCommitPreview(preview)==true,"Engine rejected original scenery restoration")
-        progress(true,90,"Saving restored scenery…")
-        local committed=api.undo.CommitPreview(preview)
-        preview=nil
-        -- The native placement clients now own the objects. This marker only
-        -- prevents re-import: deletion, movement and saving remain normal game work.
         state.complete=true;state.count=count;state.source=data.source
-        wait(function() return api.undo.IsOperationComplete(committed) end,"Scenery commit timed out")
-        api.undo.Checkpoint({})
+
     end)
     if preview then
         local cancelled,cancelError=g.pcall(function()
@@ -158,11 +173,61 @@ function S.AfterLoad(world,progress)
         end)
         if not cancelled then ok=false;message=g.tostring(message).."; "..g.tostring(cancelError) end
     end
+    world.parkExpansionsSceneryPreview=nil
     if changedConstraints then w.park:ActivateParkEditConstraints() end
-    progress(false,100,"")
+    world.parkExpansionsSceneryConstraints=nil
+    if saveControl then saveControl:ResumeSave() end
+    world.parkExpansionsScenerySaveControl=nil
     if not ok then
         state.error=g.tostring(message)
         api.debug.Trace("Park Expansions scenery: "..state.error)
+    end
+    progress(false,100,"")
+end
+
+-- OnLoad registers the save client only. Match the game's default spawn-point
+-- placement: create objects from OnAdvance after OnActivate has completed.
+function S.Queue(world)
+    if world.parkExpansionsScenery and not world.parkExpansionsScenery.complete then
+        world.parkExpansionsSceneryPending=true
+    end
+end
+
+function S.Advance(world,progress)
+    if not world.parkExpansionsSceneryPending and not world.parkExpansionsSceneryTask then return false end
+    if world.fnGenerateSpawnPoint then return true end
+    if not world.parkExpansionsSceneryTask then
+        if api.undo.IsBusy() then return true end
+        world.parkExpansionsSceneryPending=nil
+        world.boundaryLabProgress=0
+        world.parkExpansionsSceneryTask=g.coroutine.create(function()S.AfterLoad(world,progress)end)
+    end
+    local task=world.parkExpansionsSceneryTask
+    local ok,message=g.coroutine.resume(task)
+    if not ok then
+        world.parkExpansionsScenery.error=g.tostring(message)
+        S.Shutdown(world)
+        progress(false,0,"Scenery restoration failed.")
+    elseif g.coroutine.status(task)=="dead" then
+        world.parkExpansionsSceneryTask=nil
+    end
+    return true
+end
+
+function S.Shutdown(world)
+    world.parkExpansionsSceneryPending=nil
+    world.parkExpansionsSceneryTask=nil
+    if world.parkExpansionsSceneryPreview then
+        api.undo.CancelPreview(world.parkExpansionsSceneryPreview)
+        world.parkExpansionsSceneryPreview=nil
+    end
+    if world.parkExpansionsSceneryConstraints then
+        api.world.GetWorldAPIs().park:ActivateParkEditConstraints()
+        world.parkExpansionsSceneryConstraints=nil
+    end
+    if world.parkExpansionsScenerySaveControl then
+        world.parkExpansionsScenerySaveControl:ResumeSave()
+        world.parkExpansionsScenerySaveControl=nil
     end
 end
 

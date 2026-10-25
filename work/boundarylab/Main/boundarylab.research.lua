@@ -157,7 +157,7 @@ function R.Push()
     -- overruns its stack before it checks the count; pcall cannot catch that.
     -- One JSON string carries the complete snapshot without native varargs.
     local payload="["..g.table.concat({g.tostring(s.managed),g.tostring(s.width),g.tostring(s.height),
-        g.tostring(balance),g.tostring(world and world.boundaryLabResearchBusy or false),
+        g.tostring(balance),g.tostring(world and (world.boundaryLabResearchBusy or world.parkExpansionsSceneryPending or world.parkExpansionsSceneryTask~=nil) or false),
         g.tostring(world and world.boundaryLabProgress or 0),
         jsonString(world and world.boundaryLabMessage or "Create a new empty sandbox to use park expansion."),
         g.tostring(world and free(world) or false),
@@ -587,7 +587,7 @@ function R.Request(branch,level)
     local s=state(world)
     level=g.tonumber(level)
     local restore=level==s[branch] and s[branch]>0
-    if not s.managed or world.boundaryLabResearchBusy or world.boundaryLabTask
+    if not s.managed or world.parkExpansionsSceneryPending or world.parkExpansionsSceneryTask or world.boundaryLabResearchBusy or world.boundaryLabTask
         or (not restore and level~=s[branch]+1) or level<1 or level>5 or api.undo.IsBusy() then return end
     local cost=(restore or free(world)) and 0 or R.Costs[level]
     if points()<cost then world.boundaryLabMessage="Not enough research points.";R.Push();return end
@@ -629,7 +629,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.44 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.45 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
@@ -647,6 +647,8 @@ function R.Report()
         .."\nCONFIG_WARNING="..g.tostring(settings(current).warning)
         .."\nCONFIG_ERROR="..g.tostring(settings(current).error)
         .."\nSCENERY_IMPORTED="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.complete)
+        .."\nSCENERY_PENDING="..g.tostring(current.parkExpansionsSceneryPending or current.parkExpansionsSceneryTask~=nil)
+        .."\nSCENERY_NEXT_INDEX="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.nextIndex)
         .."\nSCENERY_COUNT="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.count)
         .."\nSCENERY_ERROR="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.error)
         .."\nLOADING_UI_DRIVER="..g.tostring(loadingDiagnostics.driver)
