@@ -1,10 +1,10 @@
 {
-  "version": "0.42-test",
-  "archive": "Park-Expansions-0.42-test.zip",
-  "archive_sha256": "2290f10f73673abd0b4058eec2433793ba09e84805a106e1353859980246f433",
-  "bytes": 23341808,
+  "version": "0.43-test",
+  "archive": "Park-Expansions-0.43-test.zip",
+  "archive_sha256": "07df3e68304b1d126652f0a830d8341ba228a0b77e55c2aaddb871e8720e0ecb",
+  "bytes": 23354899,
   "file_sha256": {
-    "Mod_BoundaryLab/Compatibility/AutoWorker/ParkExpansionsWorker.exe": "aac217269a3fdeaa98c0ba8b05c36270408764d8986cbf18544d0002338a55ac",
+    "Mod_BoundaryLab/Compatibility/AutoWorker/ParkExpansionsWorker.exe": "8b5e456eac86dba86a76c14e9e828c8513bba734fad8c207aa21d755dbc0b7d1",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/81d243bd2c585b0f4821__mypyc.cp314-win_amd64.pyd": "ab64835b63093c31975df2692756c8008e7ec190e4aa86f15a713bcc62e1d432",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/VCRUNTIME140.dll": "052ad6a20d375957e82aa6a3c441ea548d89be0981516ca7eb306e063d5027f4",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/VCRUNTIME140_1.dll": "6a99bc0128e0c7d6cbbf615fcc26909565e17d4ca3451b97f8987f9c6acbc6c8",
@@ -65,7 +65,7 @@
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/api-ms-win-crt-string-l1-1-0.dll": "fcf12466cc12fd3b73611fc0763a5a1f9d44e90349513c34a0c83b0f36421793",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/api-ms-win-crt-time-l1-1-0.dll": "886e57c4a6adb299b38f02945369f590a67da4e79a798359fc60aaa067212d7c",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/api-ms-win-crt-utility-l1-1-0.dll": "5f8f26b216ade615b67a41f6fbbb910972fc6153315a65bb8f09912be50215b1",
-    "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/base_library.zip": "e1c4ad26f24bc13e1b3b80790ce3803716db0f2933802fcb0542d2348eec191c",
+    "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/base_library.zip": "ee2d060bf87942d6872dfad66310d59c053ce9942a917adc1806555c03e60c1d",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/charset_normalizer/cd.cp314-win_amd64.pyd": "da3ce780d6d58ae8c6920b99f806f64d58a1b33f4a01382861b01b50549199f8",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/charset_normalizer/md.cp314-win_amd64.pyd": "8e3e0a719a4ec835fbd9b3128636a09692fe173f4e01c527653bfdb7bd723808",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/libcrypto-3.dll": "53c529145339fb042a3dcd3a09c2d7753204f8b4fc79d99e0d31e69a33985958",
@@ -122,8 +122,8 @@
     "Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll": "6d669fedbec221478fa5253930581ed0ca59d8481f72d2fc913912e98bab0b9f",
     "Mod_BoundaryLab/Compatibility/PyInstaller-COPYING.txt": "dcf75fdb959db1e3b41c0f8505069d2ece781b5ec6b3d0a4d30975cfc6580245",
     "Mod_BoundaryLab/Compatibility/Python-LICENSE.txt": "935cf13e19f8c31b497d20b05d73623431a226b230c3599bc30fa3348979bc68",
-    "Mod_BoundaryLab/Config.ini": "d6ba1c10164c7d733324d08408184ca1996f673bbbcffdfcfb369c8c21512b9a",
-    "Mod_BoundaryLab/Main.ovl": "f794bc1851357ee07022abd336e404b70b77f86f9f8b62a7ebdeea643eba1e36",
+    "Mod_BoundaryLab/Config.ini": "e144b7b3a6fa9f4ffbf628aa98b581c6fd0abfaf6a6b3f6baeab81031c8dd834",
+    "Mod_BoundaryLab/Main.ovl": "4d1a82beecafe53d3762ee25a80bf78d4457e7ca08b98c523dfa02d4fc5195dc",
     "Mod_BoundaryLab/Manifest.xml": "43841d0e4785ef45e81079e19687b6c45f2146467aed9c15bd08edaa14fcb24a"
   }
 }

@@ -37,6 +37,7 @@ local function test(label,options)
   return originalLoadfile(path,...)
  end
  require=function(name)
+  if name=="boundarylab.scenery" then return {BeforeLoad=function()end,AfterLoad=function()end} end
   if name=="boundarylab.research" then
    return {Progress=function() end,Finish=function() end,AddUIHooks=function() end,Advance=function() end,
     BeforeLoad=function(world)world.parkExpansionsMapFailed=options.mapFail end,AfterLoad=function() end}

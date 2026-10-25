@@ -38,7 +38,7 @@ build\ovl-env\Scripts\python tools/build_ui.py
 build\ovl-env\Scripts\python work/build_boundarylab.py
 ```
 
-The OVL builder syntax-checks Lua, creates a Planet Coaster 2 ZLIB OVL, reloads it, and checks the two Lua files and four embedded UI resources against their sources. Cobra Tools must include its Lua utilities and hash data.
+The OVL builder syntax-checks Lua, creates a Planet Coaster 2 ZLIB OVL, reloads it, and checks the three Lua files and four embedded UI resources against their sources. Cobra Tools must include its Lua utilities and hash data.
 
 ## Tests
 
@@ -80,3 +80,10 @@ work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_loading_progress
 ```
 
 For the real Win64 argument-reader regression, build `bridge.cpp` as a separate DLL with `/DBRIDGE_TEST`, output `build/bridge_contract.dll`, then run `python work/test_native_argument_contract.py`. This test-only DLL is never distributed; the shipped DLL is built without `BRIDGE_TEST`.
+
+Scenery preservation checks (stock archives are read-only):
+
+```bat
+python work/test_stock_scenery.py --game-dir "PATH_TO_PLANET_COASTER_2" --cobra-tools work/cobra-tools
+work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_scenery.lua
+```

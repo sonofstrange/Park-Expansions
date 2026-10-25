@@ -1,6 +1,6 @@
 # Executable components and Nexus review
 
-This document describes the 0.41-test source and package; it is not an antivirus certification.
+This document describes the 0.43-test source and package; it is not an antivirus certification.
 
 ## ParkExpansionsBridge.dll
 
@@ -29,3 +29,7 @@ For Nexus moderation, provide the mod page link, this repository and the exact r
 The worker now also accepts a `__prepare_map__` request from the Lua bridge. It resolves the installed game's root from the fixed mod directory layout, reads the selected biome's original Sandbox/landscape assets, creates a 2048 m map and underlay pair, and verifies preservation of source voxel data. It uses NumPy for height/material sampling. The source game files are never modified. Generated maps, per-biome validation probes and checksummed generation manifests are written under `Mod_BoundaryLab/Maps`. Converted saves and immutable progress/result files remain under `AutoConversion`.
 
 NumPy's license notices are included with the frozen runtime. The generated files are not bundled in the smaller download. Existing 0.35 reference maps in this source repository are only regression fixtures for this branch.
+
+## Scenery preservation in 0.43
+
+`stock_scenery.py` reads only the selected original biome-world OVL with a bounded, layout-checked ZLIB reader. It writes a checksummed `.decor.lua` cache and manifest under `Maps`. `boundarylab.scenery.lua` imports those transforms as native editable scenery parts during loading. A new `ParkExpansionsScenery` serialization client records completion; the native placement clients save the actual objects. Generation does not modify the original world OVL, source parks, terrain files or saves.

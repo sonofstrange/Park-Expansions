@@ -31,7 +31,7 @@ ovl.create(str(src))
 ovl.save(str(out / 'Main.ovl'))
 check = OvlFile()
 check.load(str(out / 'Main.ovl'), commands={'game': 'Planet Coaster 2'})
-assert len(check.loaders) == 3
+assert len(check.loaders) == 4
 for source in src.glob('*.lua'):
     loader = check.loaders[source.name]
     assert loader.data_entry.buffer_datas[0] == source.read_bytes()

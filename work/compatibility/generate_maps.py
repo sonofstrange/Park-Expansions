@@ -1,6 +1,6 @@
 """Generate the tested 2048 m terrain from the installed game, on demand."""
 from pathlib import Path
-import hashlib, json, os, zlib
+import hashlib, json, os, struct, zlib
 from terrain_codec import Volume, unpack, clients, put_uint, digest, decode_density, encode_density, material_parts
 from stock_terrain import COLLAR
 
@@ -105,7 +105,7 @@ def source_blob(raw,client):
     return raw[start:record[3]]
 
 
-def ensure_maps(mod_dir,biome,progress,game_dir=None):
+def _ensure_maps(mod_dir,biome,progress,game_dir=None):
     mod_dir=Path(mod_dir).resolve()
     name=BIOMES.get(biome.casefold())
     if not name: raise ValueError('Unsupported terrain biome')
@@ -159,3 +159,23 @@ def ensure_maps(mod_dir,biome,progress,game_dir=None):
             if temp.exists(): temp.unlink()
     progress(100,'Terrain ready')
     return {'status':'map_ready','progress':100,'filename':name+'.bin','cached':False}
+
+
+def ensure_maps(mod_dir,biome,progress,game_dir=None):
+    from stock_scenery import ensure_scenery
+    mod_dir=Path(mod_dir).resolve()
+    game_dir=Path(game_dir).resolve() if game_dir is not None else mod_dir.parents[2]
+    result=_ensure_maps(mod_dir,biome,lambda n,message: progress(round(n*0.95),message),game_dir)
+    name=BIOMES[biome.casefold()]
+    progress(96,'Preparing original scenery')
+    try:
+        result['scenery']=ensure_scenery(mod_dir,name,game_dir)
+    except (OSError,ValueError,AssertionError,struct.error,zlib.error) as error:
+        # Optional scenery must never prevent a verified terrain from loading.
+        result['scenery_error']=str(error)
+        (mod_dir/'Maps'/(name+'.decor.lua')).write_text(
+            'return {version=1,error="Original scenery could not be prepared. See the scenery error report."}\n',
+            encoding='utf-8',newline='\n')
+        (mod_dir/'Maps'/(name+'.decor-error.txt')).write_text(str(error),encoding='utf-8',newline='\n')
+    progress(100,'Terrain ready')
+    return result
