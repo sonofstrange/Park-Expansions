@@ -18,7 +18,7 @@ Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open
 
 ## Compatibility
 
-Development version **0.37-test**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
+Development version **0.38-test**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
 
 The maximum tested buildable width is 2040 m, leaving a 4 m margin at each terrain edge. Setting 4096 in the config does not generate a larger terrain.
 
@@ -64,3 +64,9 @@ Terrain is still **2048 × 2048 m** with **2040 × 2040 m** tested buildable spa
 - The loading overlay uses a separate one-string event payload and never queries park APIs before they are ready. Existing research and HUD behavior is unchanged.
 
 The small package remains a test build pending manual game confirmation. The public 0.35 release is unchanged.
+
+### 0.38 loading-screen hookup
+
+The loading page now imports the overlay directly alongside the original game's LoadingScreen app. Only the LoadingScreen view's page address changes; its native callbacks, depth and animation remain intact. Hooks also target the concrete UI.LoadingScreenUI subclass so they do not rely solely on base-class hooks. The overlay no longer depends on a ForgeUtils import event reaching this view.
+
+Copy Report includes loading-page routing, ready and received-progress counters. This change is awaiting manual visual confirmation. A biome already in the generated cache may prepare too quickly for the bar to remain visible.

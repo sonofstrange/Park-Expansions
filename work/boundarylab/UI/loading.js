@@ -34,6 +34,7 @@ export function receiveProgress(payload) {
     if (typeof active!=='boolean' || !Number.isFinite(percent) || typeof message!=='string') return;
     state={active,percent:Math.max(0,Math.min(100,Math.floor(percent))),message};
     render();
+    if (active && visible) Engine.sendEvent('ParkExpansions_LoadingAck',state.percent);
 }
 function show() {
     visible=true;state={active:false,percent:0,message:''};render();
@@ -44,5 +45,6 @@ Engine.whenReady.then(()=>{
     Engine.addListener('ParkExpansions_LoadProgress',receiveProgress);
     Engine.addListener('Show',show);
     Engine.addListener('Hide',hide);
+    Engine.sendEvent('ParkExpansions_LoadingReady');
     Engine.sendEvent('ParkExpansions_RequestLoadProgress');
 });

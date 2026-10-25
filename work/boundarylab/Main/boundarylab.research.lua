@@ -7,6 +7,7 @@ local wrappers = g.setmetatable({}, {__mode="k"})
 local current
 local loadingWrappers=g.setmetatable({}, {__mode="k"})
 local loadingState={active=false,percent=0,message=""}
+local loadingDiagnostics={routed=0,views=0,ready=0,updates=0,lastPercent=-1}
 
 local function contours(world,template)
     local s=world.boundaryLabResearch
@@ -73,7 +74,8 @@ local function pushLoading()
     local payload="["..g.tostring(loadingState.active)..","..g.tostring(loadingState.percent)..","..jsonString(loadingState.message).."]"
     for wrapper in g.pairs(loadingWrappers) do
         if wrapper:IsReady() then
-            g.pcall(function() wrapper:TriggerEventAtNextAdvance("ParkExpansions_LoadProgress",payload) end)
+            local ok,message=g.pcall(function() wrapper:TriggerEventAtNextAdvance("ParkExpansions_LoadProgress",payload) end)
+            if not ok then loadingDiagnostics.error=g.tostring(message) end
         end
     end
 end
@@ -88,6 +90,17 @@ end
 local function attachLoading(wrapper)
     if loadingWrappers[wrapper] then return end
     loadingWrappers[wrapper]=true
+    loadingDiagnostics.views=loadingDiagnostics.views+1
+    wrapper:AddEventListener("ParkExpansions_LoadingReady",0,function()
+        loadingDiagnostics.ready=loadingDiagnostics.ready+1
+        pushLoading()
+    end,nil)
+    wrapper:AddEventListener("ParkExpansions_LoadingAck",1,function(percent)
+        if g.type(percent)=="number" then
+            loadingDiagnostics.updates=loadingDiagnostics.updates+1
+            loadingDiagnostics.lastPercent=percent
+        end
+    end,nil)
     wrapper:AddEventListener("ParkExpansions_RequestLoadProgress",0,pushLoading,nil)
     pushLoading()
 end
@@ -571,7 +584,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.37 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.38 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
@@ -588,6 +601,12 @@ function R.Report()
         .."\nMANUAL_HEIGHT="..g.tostring(settings(current).ManualMaxHeight)
         .."\nCONFIG_WARNING="..g.tostring(settings(current).warning)
         .."\nCONFIG_ERROR="..g.tostring(settings(current).error)
+        .."\nLOADING_UI_ROUTED="..g.tostring(loadingDiagnostics.routed)
+        .."\nLOADING_UI_VIEWS="..g.tostring(loadingDiagnostics.views)
+        .."\nLOADING_UI_READY="..g.tostring(loadingDiagnostics.ready)
+        .."\nLOADING_UI_UPDATES="..g.tostring(loadingDiagnostics.updates)
+        .."\nLOADING_UI_LAST_PERCENT="..g.tostring(loadingDiagnostics.lastPercent)
+        .."\nLOADING_UI_ERROR="..g.tostring(loadingDiagnostics.error)
         .."\n"..(current.boundaryLabReport or current.boundaryLabMessage or "")
     api.world.GetWorldAPIs().editors:CopyToClipboard(report)
     current.boundaryLabMessage="Report copied. Paste it into chat with Ctrl+V."
@@ -708,7 +727,8 @@ function R.Init()
     api.ui2.MapResources("BoundaryLabUI")
     local uiHooks=g.require("forgeutils.uihookmanager")
     uiHooks:AddImportHook("HUD","/js/boundarylab/research.js")
-    uiHooks:AddImportHook("LoadingScreen","/js/boundarylab/loading.js")
+    -- Load our module directly. A loading view must not depend on an import
+    -- hook that may be absent from its cached/copy-inherited UI implementation.
     -- The persistent loading view may already be ready when this mod initializes.
     local existing=api.forgeutils and api.forgeutils.uiHookManagerState
     for wrapper,view in g.pairs(existing and existing.wrappers or {}) do
@@ -716,6 +736,27 @@ function R.Init()
     end
     -- Forge's hook manager also handles a UI wrapper loaded before this mod.
     local hooks=g.require("forgeutils.hookmanager")
+    hooks:AddHook("UI.LoadingScreenUI","Init",function(original,self,settings)
+        if settings.sViewName=="LoadingScreen" then
+            local copy={}
+            for key,value in g.pairs(settings) do copy[key]=value end
+            copy.sViewAddress="coui://UIGameface/boundarylab/LoadingScreen.html"
+            loadingDiagnostics.routed=loadingDiagnostics.routed+1
+            return original(self,copy)
+        end
+        return original(self,settings)
+    end)
+    -- Hook the concrete subclass too: it can retain inherited methods copied
+    -- before the base wrapper's hooks were installed.
+    hooks:AddHook("UI.LoadingScreenUI","_OnReadyCallback",function(original,self,...)
+        local result=original(self,...)
+        attachLoading(self)
+        return result
+    end)
+    hooks:AddHook("UI.LoadingScreenUI","Shutdown",function(original,self,...)
+        loadingWrappers[self]=nil
+        return original(self,...)
+    end)
     hooks:AddHook("UI.GamefaceUIWrapper","_OnReadyCallback",function(original,self,...)
         local result=original(self,...)
         if self.tInitSettings.sViewName=="LoadingScreen" then attachLoading(self) end

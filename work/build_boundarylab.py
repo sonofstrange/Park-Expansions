@@ -36,10 +36,10 @@ for source in src.glob('*.lua'):
     loader = check.loaders[source.name]
     assert loader.data_entry.buffer_datas[0] == source.read_bytes()
 ui=check.loaders['boundarylabui.ppuipkg'].header
-assert int(ui.files_count)==4
+assert int(ui.files_count)==5
 for entry in ui.files.data:
     raw=bytes(entry.file_content.data)
-    assert raw in ((root/'boundarylab/UI/research.js').read_bytes(),(root/'boundarylab/UI/Research.css').read_bytes(),(root/'boundarylab/UI/loading.js').read_bytes(),(root/'boundarylab/UI/Loading.css').read_bytes())
+    assert raw in ((root/'boundarylab/UI/research.js').read_bytes(),(root/'boundarylab/UI/Research.css').read_bytes(),(root/'boundarylab/UI/loading.js').read_bytes(),(root/'boundarylab/UI/Loading.css').read_bytes(),(root/'boundarylab/UI/LoadingScreen.html').read_bytes())
 shutil.copy2(root / 'boundarylab/Config.ini', out / 'Config.ini')
 (out / 'Manifest.xml').write_text('''<ContentPack version="1">
   <Name>Mod_BoundaryLab</Name>

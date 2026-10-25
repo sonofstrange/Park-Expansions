@@ -16,6 +16,7 @@ require=function(name)
     if name=="forgeutils.uihookmanager" then return {AddImportHook=function(_,view,path)
         assert((view=="HUD" and path=="/js/boundarylab/research.js") or (view=="LoadingScreen" and path=="/js/boundarylab/loading.js"))end}end
     if name=="forgeutils.hookmanager" then return {AddHook=function(_,module,name,fn)
+        if module=="UI.LoadingScreenUI"then return end
         assert(module=="UI.GamefaceUIWrapper");hooks[name]=fn end}end
     return originalRequire(name)
 end

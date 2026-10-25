@@ -1,4 +1,4 @@
-# Building Park Expansions 0.37-test
+# Building Park Expansions 0.38-test
 
 Run commands from the repository root on **64-bit Windows**. Source for every mod-specific compiled component is included. The earlier release terrain files remain checked in as regression references. The small package excludes them and generates its own cache at first use. No game executable or save is needed to compile the DLL or worker.
 
@@ -38,7 +38,7 @@ build\ovl-env\Scripts\python tools/build_ui.py
 build\ovl-env\Scripts\python work/build_boundarylab.py
 ```
 
-The OVL builder syntax-checks Lua, creates a Planet Coaster 2 ZLIB OVL, reloads it, and checks the two Lua files and four embedded UI resources against their sources. Cobra Tools must include its Lua utilities and hash data.
+The OVL builder syntax-checks Lua, creates a Planet Coaster 2 ZLIB OVL, reloads it, and checks the two Lua files and five embedded UI resources against their sources. Cobra Tools must include its Lua utilities and hash data.
 
 ## Tests
 
@@ -60,7 +60,7 @@ The historical numeric suffix in a test filename is not the mod version. Placeme
 python tools/package.py
 ```
 
-Produces `dist/Park-Expansions-0.37-test.zip` with one `Mod_BoundaryLab` folder and no instructions inside. The repository also includes the original release binaries, prepared maps and third-party runtime. Rebuilding with a different toolchain may produce different binary hashes; byte-for-byte reproducibility is not claimed. See `release-manifest.json` for the original release hashes.
+Produces `dist/Park-Expansions-0.38-test.zip` with one `Mod_BoundaryLab` folder and no instructions inside. The repository also includes the original release binaries, prepared maps and third-party runtime. Rebuilding with a different toolchain may produce different binary hashes; byte-for-byte reproducibility is not claimed. See `release-manifest.json` for the original release hashes.
 
 ## Terrain generation integration test
 
