@@ -116,6 +116,14 @@ local function validatePreview(preview)
     return false,reasons
 end
 
+local function onlyParkBounds(reasons)
+    if not reasons or not reasons.bOutOfBounds or reasons.bOutOfBounds==0 then return false end
+    for key,value in g.pairs(reasons) do
+        if key~="bOutOfBounds" and value~=nil and value~=false and value~=0 then return false end
+    end
+    return true
+end
+
 local function rejectionDetails(reasons)
     local active={}
     for key,value in g.pairs(reasons or {}) do
@@ -144,6 +152,12 @@ function S.AfterLoad(world,progress)
             filename:gsub("%.bin$",".decor.lua"),"t",{}),"Original scenery cache is missing")
         local data=chunk()
         local count=validate(data)
+        for _,group in g.ipairs(data.groups) do
+            for _,row in g.ipairs(group.instances) do
+                g.assert(row[1]>=a:GetX() and row[1]<=b:GetX() and row[2]>=a:GetY() and row[2]<=b:GetY()
+                    and row[3]>=a:GetZ() and row[3]<=b:GetZ(),"Original scenery exceeds the physical terrain volume")
+            end
+        end
         local Vector3=g.require("Vector3")
         local TransformQ=g.require("TransformQ")
         local Quaternion=g.require("Quaternion")
@@ -197,9 +211,16 @@ function S.AfterLoad(world,progress)
             local allowed,reasons=validatePreview(preview)
             state.lastReasons=rejectionDetails(reasons)
             state.batchFirst=cursor;state.batchLast=last;state.batchResource=placements[cursor].resource
-            g.assert(allowed,"Engine rejected original scenery restoration: "..state.lastReasons..
+            local backgroundBounds=not allowed and onlyParkBounds(reasons)
+            g.assert(allowed or backgroundBounds,"Engine rejected original scenery restoration: "..state.lastReasons..
                 " (objects "..cursor..".."..last..", "..state.batchResource..")")
+            -- CPTWorld.SpawnScenery_ConsoleCommand uses CommitPreview after
+            -- validation settles without requiring CanCommitPreview to be true.
+            -- This exception restores original backdrop inside the verified voxel
+            -- volume; it does not unlock plots or permit other validation failures.
             local committed=api.undo.CommitPreview(preview)
+            g.assert(committed~=nil,"Original scenery commit did not start")
+            if backgroundBounds then state.boundsBatches=(state.boundsBatches or 0)+1 end
             preview=nil;world.parkExpansionsSceneryPreview=nil
             -- Native save clients own committed objects. Record the continuation
             -- immediately, so an interrupted import cannot duplicate that batch.

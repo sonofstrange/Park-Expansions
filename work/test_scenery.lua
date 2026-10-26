@@ -2,7 +2,7 @@
 local nativeLoadfile=loadfile
 local nativeRequire=require
 local V={}
-function V:new(x,y,z) return {x=x,y=y,z=z,GetX=function(s)return s.x end,GetZ=function(s)return s.z end} end
+function V:new(x,y,z) return {x=x,y=y,z=z,GetX=function(s)return s.x end,GetY=function(s)return s.y end,GetZ=function(s)return s.z end} end
 local groups={{resource="NAT_Tree_Test",instances={{600,20,40,0.5},{-700,32,20,-1}}}}
 local function run(kind)
     local created,placed,commits,cancels,activated,deactivated=0,{},0,0,0,0
@@ -15,6 +15,7 @@ local function run(kind)
         expected=260
     end
     local data={version=1,source=string.rep('a',64),groups=groups}
+    if kind=='physical' then data={version=1,source=string.rep('a',64),groups={{resource='NAT_Tree_Test',instances={{600,3000,40,0}}}}} end
     if kind=='invalid' then data={version=1,source=string.rep('a',64),groups={{resource='NAT_Tree_Test',instances={{1,20,1,0}}}}} end
     local world={boundaryLabTerrainCreated=true,boundaryLabFilename='TaigaSandbox.bin'}
     local batchSize=0
@@ -27,7 +28,7 @@ local function run(kind)
     local w={worldserialisation={RegisterWorldSerialisationClient=function(_,name,version,s,l)
         assert(name=='ParkExpansionsScenery' and version==1);saveFn=s;loadFn=l
     end},voxelterrain={GetPrimaryVoxelTerrainEntityID=function()return 1 end,
-        GetWorldBounds=function()return V:new(-1024,0,-1024),V:new(1023,0,1023)end},
+        GetWorldBounds=function()return V:new(-1024,-2304,-1024),V:new(1023,2303,1023)end},
         editors={CreateUndoOperationsHierarchy=function()batchSize=0;return hierarchy end},
         park={DeactivateParkEditConstraints=function()deactivated=deactivated+1 end,
             ActivateParkEditConstraints=function()activated=activated+1 end}}
@@ -38,11 +39,11 @@ local function run(kind)
         undo={IsBusy=function()return false end,PreviewChangeList=function()previews=previews+1;return 2,3 end,IsOperationComplete=function()return true end,
             CanCommitPreview=function()
                 checks=checks+1
-                return kind~='rejected' and not(kind=='partial' and previews==2) and
+                return kind~='rejected' and kind~='bounds' and kind~='mixed' and not(kind=='partial' and previews==2) and
                     not(kind=='pending' and checks<12)
             end,
             GetCommitFailReasons=function()
-                return {bUnknown=kind=='pending' and checks<12,bOutsidePark=kind=='rejected'}
+                return {bUnknown=kind=='pending' and checks<12,bOutsidePark=kind=='rejected' or kind=='mixed',bOutOfBounds=kind=='bounds' or kind=='mixed'}
             end,
             CommitPreview=function()commits=commits+1;return 4 end,
             CancelPreview=function()cancels=cancels+1;return 5 end,Checkpoint=function()end}}
@@ -69,8 +70,9 @@ local function run(kind)
     end
     if kind=='saved' then loadFn({complete=true,count=2,source=data.source}) end
     restore()
-    if kind=='success' or kind=='batches' or kind=='pending' then
+    if kind=='success' or kind=='batches' or kind=='pending' or kind=='bounds' then
         assert(commits==math.ceil(expected/128) and created==expected and cancels==0)
+        if kind=='bounds' then assert(world.parkExpansionsScenery.boundsBatches==1)end
         assert(placed[1].position.x==600 and placed[1].position.y==20 and placed[1].orientation.x==0.5)
         assert(world.parkExpansionsScenery.complete and world.parkExpansionsScenery.count==expected)
         local saved={};saveFn(saved)
@@ -86,7 +88,7 @@ local function run(kind)
         assert(commits==3 and created==388 and world.parkExpansionsScenery.complete)
         assert(world.parkExpansionsScenery.count==260,'Incomplete import did not resume at committed cursor')
     elseif kind=='saved' then assert(created==0 and commits==0)
-    elseif kind=='invalid' or kind=='missing' then assert(created==0 and commits==0 and world.parkExpansionsScenery.error)
+    elseif kind=='invalid' or kind=='missing' or kind=='physical' then assert(created==0 and commits==0 and world.parkExpansionsScenery.error)
     else assert(commits==0 and cancels==1 and not world.parkExpansionsScenery.complete)
         assert(world.parkExpansionsScenery.error:find('bOutsidePark=true',1,true),'Native rejection reason missing')end
     assert(activated==deactivated,'Park edit constraints were not restored')
@@ -94,7 +96,7 @@ local function run(kind)
     require=nativeRequire;loadfile=nativeLoadfile
     print('PASS scenery '..kind)
 end
-for _,kind in ipairs({'pending','success','saved','invalid','missing','rejected','partial','batches'})do run(kind)end
+for _,kind in ipairs({'pending','success','saved','invalid','physical','missing','bounds','mixed','rejected','partial','batches'})do run(kind)end
 
 local definitions,parts={},{}
 local builder={}
