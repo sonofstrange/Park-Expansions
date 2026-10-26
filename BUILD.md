@@ -89,3 +89,12 @@ python work/test_stock_scenery.py --game-dir "PATH_TO_PLANET_COASTER_2" --cobra-
 work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_scenery.lua
 lua.exe work/test_scenery_lifecycle.lua
 ```
+
+Experimental 4K integration check (writes only under ignored build/):
+
+```powershell
+python work/test_4k_generation.py --game-dir "D:/SteamLibrary/steamapps/common/Planet Coaster 2"
+node work/test_research_sizes.cjs
+```
+
+The map-generation worker accepts `<biome>:4096` only for preparing the separate 4K profile. Plain biome arguments preserve the 2048 m conversion path. Runtime game testing is required before treating the larger extent as supported.

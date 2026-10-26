@@ -13,7 +13,7 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
     if widthRun and widthRun.from>0 then
         local h=widthRun.from/2;bounds={-h,h,-h,h}
     end
-    local targetHalf=widthRun and (widthRun.manual and widthRun.to/2 or math.min(widthRun.to/2,1020)) or 768
+    local targetHalf=widthRun and (widthRun.manual and widthRun.to/2 or math.min(widthRun.to/2,(widthRun.size or 2048)/2-4)) or 768
     local seedPoint=widthRun and widthRun.from>0 and {bounds[1],10,bounds[3]} or template.seed
     local rayTop=widthRun and 2304 or 1280
     local rayDepth=widthRun and 4609 or 2561
@@ -86,7 +86,7 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
                 and p.z >= bounds[3]*scale and p.z <= bounds[4]*scale
         end}
     w.voxelterrain={GetPrimaryVoxelTerrainEntityID=function() return 1 end,
-        GetWorldBounds=function() if widthRun then return V:new(-1024,-2304,-1024),V:new(1023,2303,1023) end;return V:new(-1024,-1280,-1024),V:new(1023,1279,1023) end,
+        GetWorldBounds=function() if widthRun then local h=(widthRun.size or 2048)/2;return V:new(-h,-2304,-h),V:new(h-1,2303,h-1) end;return V:new(-1024,-1280,-1024),V:new(1023,1279,1023) end,
         PointTest=function(_,id,p)
             pointCalls=pointCalls+1
             assert(id==1)
@@ -176,7 +176,7 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
         if module=="Helpers.PopUpDialogUtils" then
             return {RunOKDialog=function(_,message)
                 popupCount=popupCount+1
-                assert(clipboardReport and clipboardReport:find("Park Expansions 0.48 report",1,true),"Missing clipboard report")
+                assert(clipboardReport and clipboardReport:find("Park Expansions 0.49 report",1,true),"Missing clipboard report")
                 assert(clipboardReport:find("CONNECTED posts="..#posts.." panels="..#panels,1,true),"Missing contour diagnosis")
                 if not allowCommit then assert(message:find("outsideBounds=true",1,true),"Lost rejection details") end
                 if controlAccepted then assert(message:find("Unchanged contour: accepted",1,true),"Lost control result") end
@@ -192,7 +192,7 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
     local database=assert(originalLoadfile(source))()
     local worldClass={OnAdvance=function() end}
     database.AddLuaHooks(function(module,hook) assert(module=="Worlds.CPTWorld");hook(worldClass) end)
-    local self={boundaryLabTerrainCreated=parkName~="Saved Park",
+    local self={parkExpansionsTerrainSize=widthRun and widthRun.size or 2048,boundaryLabTerrainCreated=parkName~="Saved Park",
         boundaryLabTemplate=template, boundaryLabExpectedBounds=widthRun and bounds or nil,
         boundaryLabActiveSeed=widthRun and seedPoint or nil}
     if widthRun and widthRun.manual then
@@ -323,3 +323,8 @@ end
 
 test("manual size shrinks known boundary 1792 -> 512", "My test",true,nil,nil,nil,nil,nil,"taigasandbox.bin",nil,"rectangle",{from=1792,to=512,manual=true})
 test("manual size 3000 accepted by config path but rejected by actual terrain without clamping", "My test",true,nil,nil,nil,nil,nil,"taigasandbox.bin",nil,"rectangle",{from=1792,to=3000,manual=true,outsideTerrain=true})
+
+local largeWidths={1536,2040,2560,3072,4088}
+for i,width in ipairs(largeWidths) do
+ test("4K research boundary -> "..width,"My test",true,nil,nil,nil,nil,nil,"taigasandbox.bin",nil,"rectangle",{from=i==1 and 0 or largeWidths[i-1],to=width,size=4096})
+end

@@ -17,7 +17,8 @@ local function run(kind)
     local data={version=1,source=string.rep('a',64),groups=groups}
     if kind=='physical' then data={version=1,source=string.rep('a',64),groups={{resource='NAT_Tree_Test',instances={{600,3000,40,0}}}}} end
     if kind=='invalid' then data={version=1,source=string.rep('a',64),groups={{resource='NAT_Tree_Test',instances={{1,20,1,0}}}}} end
-    local world={boundaryLabTerrainCreated=true,boundaryLabFilename='TaigaSandbox.bin'}
+    local world={parkExpansionsTerrainSize=kind=='large' and 4096 or 2048,boundaryLabTerrainCreated=true,boundaryLabFilename='TaigaSandbox.bin'}
+    if kind=='large' then data.groups={{resource='NAT_Tree_Test',instances={{1600,20,40,0.5},{-1800,32,20,-1}}}}end
     local batchSize=0
     local previews=0
     local checks=0
@@ -28,7 +29,7 @@ local function run(kind)
     local w={worldserialisation={RegisterWorldSerialisationClient=function(_,name,version,s,l)
         assert(name=='ParkExpansionsScenery' and version==1);saveFn=s;loadFn=l
     end},voxelterrain={GetPrimaryVoxelTerrainEntityID=function()return 1 end,
-        GetWorldBounds=function()return V:new(-1024,-2304,-1024),V:new(1023,2303,1023)end},
+        GetWorldBounds=function()local h=world.parkExpansionsTerrainSize/2;return V:new(-h,-2304,-h),V:new(h-1,2303,h-1)end},
         editors={CreateUndoOperationsHierarchy=function()batchSize=0;return hierarchy end},
         park={DeactivateParkEditConstraints=function()deactivated=deactivated+1 end,
             ActivateParkEditConstraints=function()activated=activated+1 end}}
@@ -70,10 +71,10 @@ local function run(kind)
     end
     if kind=='saved' then loadFn({complete=true,count=2,source=data.source}) end
     restore()
-    if kind=='success' or kind=='batches' or kind=='pending' or kind=='bounds' then
+    if kind=='success' or kind=='batches' or kind=='pending' or kind=='bounds' or kind=='large' then
         assert(commits==math.ceil(expected/128) and created==expected and cancels==0)
         if kind=='bounds' then assert(world.parkExpansionsScenery.boundsBatches==1)end
-        assert(placed[1].position.x==600 and placed[1].position.y==20 and placed[1].orientation.x==0.5)
+        assert(placed[1].position.x==(kind=='large' and 1600 or 600) and placed[1].position.y==20 and placed[1].orientation.x==0.5)
         assert(world.parkExpansionsScenery.complete and world.parkExpansionsScenery.count==expected)
         local saved={};saveFn(saved)
         -- Simulate a player deleting or moving a native object: no re-import.
@@ -96,7 +97,7 @@ local function run(kind)
     require=nativeRequire;loadfile=nativeLoadfile
     print('PASS scenery '..kind)
 end
-for _,kind in ipairs({'pending','success','saved','invalid','physical','missing','bounds','mixed','rejected','partial','batches'})do run(kind)end
+for _,kind in ipairs({'pending','success','saved','invalid','physical','large','missing','bounds','mixed','rejected','partial','batches'})do run(kind)end
 
 local definitions,parts={},{}
 local builder={}

@@ -8,7 +8,7 @@ import { HighlightTab } from '/js/project/components/HighlightTab.js';
 import { ResearchModule } from '/js/project/modules/research/ResearchModule.js';
 loadCSS('boundarylab/Research');
 
-export const WIDTHS = [1152, 1344, 1536, 1792, 2040];
+export let WIDTHS = [1152, 1344, 1536, 1792, 2040];
 export const HEIGHTS = [400, 700, 1000, 1500, 2048];
 export const COSTS = [12500, 25000, 50000, 100000, 200000];
 let snapshot = {managed:false, width:0, height:0, points:0, busy:false, progress:0,
@@ -191,7 +191,7 @@ function updateOverlay() {
 export function receiveState(payload) {
     let values;
     try { values=JSON.parse(payload); } catch (error) { console.error('BoundaryLab: invalid state',error);return; }
-    if (!Array.isArray(values) || (values.length!==8 && values.length!==11)) return;
+    if (!Array.isArray(values) || (values.length!==8 && values.length!==11 && values.length!==12)) return;
     const [managed,width,height,points,busy,progress,message,free]=values;
     if (typeof managed!=='boolean' || typeof busy!=='boolean' || typeof free!=='boolean'
         || typeof message!=='string' || ![width,height,points,progress].every(Number.isFinite)) return;
@@ -199,7 +199,10 @@ export function receiveState(payload) {
     const manualSize=values.length===8 ? 2040 : values[9];
     const manualHeight=values.length===8 ? 2048 : values[10];
     if (typeof researchEnabled!=='boolean' || ![manualSize,manualHeight].every(Number.isFinite)) return;
-    snapshot={managed,width,height,points,busy,progress,message,free,researchEnabled,manualSize,manualHeight};
+    const terrainSize=values.length===12 ? values[11] : 2048;
+    if (terrainSize!==2048 && terrainSize!==4096) return;
+    WIDTHS=terrainSize===4096 ? [1536,2040,2560,3072,4088] : [1152,1344,1536,1792,2040];
+    snapshot={managed,width,height,points,busy,progress,message,free,researchEnabled,manualSize,manualHeight,terrainSize};
     panels.forEach(panel=>panel.enqueueForceUpdate());
     updateOverlay();
 }

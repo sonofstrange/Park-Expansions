@@ -8,7 +8,8 @@ import numpy as np
 COLLAR=0
 
 class StockTerrain:
-    def __init__(self,path,source_edges):
+    def __init__(self,path,source_edges,size=2048):
+        self.size=size
         packed=path.read_bytes()
         assert packed[:4]==b'BHMP'
         self.sha256=hashlib.sha256(packed).hexdigest()
@@ -73,4 +74,4 @@ class StockTerrain:
 
     @functools.lru_cache(maxsize=12)
     def root_data(self,x,z):
-        return self.exterior(np.arange(x*512-1024,x*512-512)[:,None],np.arange(z*512-1024,z*512-512)[None,:])
+        return self.exterior(np.arange(x*512-self.size//2,x*512-self.size//2+512)[:,None],np.arange(z*512-self.size//2,z*512-self.size//2+512)[None,:])

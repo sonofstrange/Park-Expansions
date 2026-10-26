@@ -1,4 +1,4 @@
-"""Generate the tested 2048 m terrain from the installed game, on demand."""
+"""Generate preserved 2048 m or experimental 4096 m terrain on demand."""
 from pathlib import Path
 import hashlib, json, os, struct, zlib
 from terrain_codec import Volume, unpack, clients, put_uint, digest, decode_density, encode_density, material_parts
@@ -7,13 +7,15 @@ from stock_terrain import COLLAR
 GENERATOR_VERSION = 36
 BIOMES = {n.lower(): n+'Sandbox' for n in ('Temperate','Tropical','Taiga','Mediterranean')}
 
-def extend(blob,name,game_dir,progress):
+def extend(blob,name,game_dir,progress,size=2048):
+    if size not in (2048,4096): raise ValueError("Unsupported terrain volume")
+    width=size//512;inner=width//2-1;total=width*9*width
     from terrain_transition import SourceEdges,exterior_root
     from stock_terrain import StockTerrain,COLLAR
     old=Volume(blob)
     assert old.shape==[2,1,2]
-    target=(4,9,4)
-    signs=bytearray(18)
+    target=(width,9,width)
+    signs=bytearray((total+7)//8)
     chunks=[]
     densities=[]
     materials=[[],[],[],[]]
@@ -21,26 +23,26 @@ def extend(blob,name,game_dir,progress):
     old_materials=material_parts(old)
     edges=SourceEdges(old,old_density)
     skirt_path=game_dir/'TerrainSkirts'/name/(name+'.bakedHeightMap')
-    stock=StockTerrain(skirt_path,edges)
+    stock=StockTerrain(skirt_path,edges,size)
     copies=[]
     # Uniform nodes have no explicit samples; sign selects solid / empty.
     uniform=b'\x00\x00'
-    for z in range(4):
+    for z in range(width):
         for y in range(9):
-            for x in range(4):
-                index=(z*9+y)*4+x
-                progress(5+int(index*70/144), "Preparing terrain: "+str(index+1)+"/144")
-                if y==4 and x in (1,2) and z in (1,2):
-                    source=(z-1)*2+(x-1)
+            for x in range(width):
+                index=(z*9+y)*width+x
+                progress(5+int(index*70/total), "Preparing terrain: "+str(index+1)+"/"+str(total))
+                if y==4 and x in (inner,inner+1) and z in (inner,inner+1):
+                    source=(z-inner)*2+(x-inner)
                     tree,_,_,sign=old.roots[source]
                     _,begin,end,_=old.roots[source]
                     density=old_density[begin:end]
                     mat=old_materials[source]
                     copies.append((source,index))
-                elif x in (1,2) and z in (1,2) and y<4:
+                elif x in (inner,inner+1) and z in (inner,inner+1) and y<4:
                     tree,sign=uniform,0
                     density=b'';mat=(b'',)*4
-                elif x in (1,2) and z in (1,2) and y>4:
+                elif x in (inner,inner+1) and z in (inner,inner+1) and y>4:
                     tree,sign=uniform,1
                     density=b'';mat=(b'',)*4
                 else:
@@ -66,12 +68,12 @@ def extend(blob,name,game_dir,progress):
         assert old_density[begin:end]==new_density[new_begin:new_end]
         assert old_materials[source]==new_materials[index]
         old_pos=((source%2)*512-512,-256,(source//2)*512-512)
-        x=index%4;y=(index//4)%9;z=index//36
-        assert old_pos==(x*512-1024,y*512-2304,z*512-1024)
+        x=index%width;y=(index//width)%9;z=index//(width*9)
+        assert old_pos==(x*512-size//2,y*512-2304,z*512-size//2)
     return new_blob,dict(original_geometry_sha256=digest(old.tree),
         original_distance_sha256=digest(old.deltas),original_material_sha256=digest(old.materials),
         preserved_root_count=4,original_sample_count=old.samples,new_sample_count=new.samples,
-        added_surface_sample_count=new.samples-old.samples,new_dimensions=[2048,4608,2048],
+        added_surface_sample_count=new.samples-old.samples,new_dimensions=[size,4608,size],
         all_original_root_bytes_and_positions_verified=True,original_density_and_material_records_verified=True,
         stock_heightmap_sha256=stock.sha256,stock_material_names=stock.names,
         source_kind='original_baked_heightmap',transition_width=COLLAR,transition_edge_columns_without_crossing=edges.missing_columns,
@@ -105,9 +107,18 @@ def source_blob(raw,client):
     return raw[start:record[3]]
 
 
+def request_profile(biome):
+    parts=biome.casefold().split(':')
+    if len(parts)>2 or parts[0] not in BIOMES: raise ValueError('Unsupported terrain biome')
+    size=2048 if len(parts)==1 else int(parts[1])
+    if size not in (2048,4096): raise ValueError('Unsupported terrain volume')
+    return parts[0],size,'Maps4096' if size==4096 else 'Maps'
+
+
 def _ensure_maps(mod_dir,biome,progress,game_dir=None):
     mod_dir=Path(mod_dir).resolve()
-    name=BIOMES.get(biome.casefold())
+    biome,size,folder_name=request_profile(biome)
+    name=BIOMES.get(biome)
     if not name: raise ValueError('Unsupported terrain biome')
     # Resolve the installation from Win64/ovldata/Mod_BoundaryLab.
     game_dir=Path(game_dir).resolve() if game_dir is not None else mod_dir.parents[2]
@@ -116,22 +127,22 @@ def _ensure_maps(mod_dir,biome,progress,game_dir=None):
     if not all(p.is_file() for p in sources):
         raise ValueError('Original park or landscape files were not found in the game installation')
     inputs={str(p.relative_to(game_dir)).replace('\\','/'):digest(p.read_bytes()) for p in sources}
-    folder=mod_dir/'Maps';folder.mkdir(exist_ok=True)
+    folder=mod_dir/folder_name;folder.mkdir(exist_ok=True)
     manifest=folder/(name+'.generation.json')
     outputs=[folder/(name+ext) for ext in ('.bin','.trn')]+[folder/(name+'.checks.lua')]
     try:
         saved=json.loads(manifest.read_text(encoding='utf-8'))
-        if (saved['version']==GENERATOR_VERSION and saved['inputs']==inputs
+        if (saved['version']==GENERATOR_VERSION and saved.get('size',2048)==size and saved['inputs']==inputs
             and all(p.is_file() and digest(p.read_bytes())==saved['outputs'][p.name] for p in outputs)):
             progress(100,'Terrain ready')
-            return {'status':'map_ready','progress':100,'filename':name+'.bin','cached':True}
+            return {'status':'map_ready','progress':100,'filename':name+'.bin','cached':True,'terrainSize':size}
     except (OSError,ValueError,KeyError,TypeError): pass
     progress(2,'Reading original terrain')
     prefix,raw=unpack(sources[0]);prefix_under,raw_under=unpack(sources[1])
     blob=source_blob(raw,'VoxelTerrain')
     under_blob=source_blob(raw_under,'VoxelTerrainUnderlay')
     if blob!=under_blob: raise ValueError('Original terrain and underlay do not match')
-    replacement,report=extend(blob,name,game_dir,progress)
+    replacement,report=extend(blob,name,game_dir,progress,size)
     expected=report['outer_ground_probe_heights']
     checks='Heights = {["'+name+'.bin"] = {'+', '.join('['+x+']='+repr(h) for x,h in expected.items())+'}}\n'
     pending=[]
@@ -152,13 +163,13 @@ def _ensure_maps(mod_dir,biome,progress,game_dir=None):
         # Publish the manifest last. An interrupted pair is never accepted as a cache hit.
         for temp,p in zip(pending,outputs): os.replace(temp,p)
         temp_manifest=manifest.with_suffix('.json.pending')
-        temp_manifest.write_text(json.dumps({'version':GENERATOR_VERSION,'inputs':inputs,'outputs':hashes,'preservation':report},indent=2),encoding='utf-8')
+        temp_manifest.write_text(json.dumps({'version':GENERATOR_VERSION,'size':size,'inputs':inputs,'outputs':hashes,'preservation':report},indent=2),encoding='utf-8')
         os.replace(temp_manifest,manifest)
     finally:
         for temp in pending:
             if temp.exists(): temp.unlink()
     progress(100,'Terrain ready')
-    return {'status':'map_ready','progress':100,'filename':name+'.bin','cached':False}
+    return {'status':'map_ready','progress':100,'filename':name+'.bin','cached':False,'terrainSize':size}
 
 
 def ensure_maps(mod_dir,biome,progress,game_dir=None):
@@ -166,16 +177,17 @@ def ensure_maps(mod_dir,biome,progress,game_dir=None):
     mod_dir=Path(mod_dir).resolve()
     game_dir=Path(game_dir).resolve() if game_dir is not None else mod_dir.parents[2]
     result=_ensure_maps(mod_dir,biome,lambda n,message: progress(round(n*0.95),message),game_dir)
-    name=BIOMES[biome.casefold()]
+    biome,size,folder_name=request_profile(biome)
+    name=BIOMES[biome]
     progress(96,'Preparing original scenery')
     try:
-        result['scenery']=ensure_scenery(mod_dir,name,game_dir)
+        result['scenery']=ensure_scenery(mod_dir,name,game_dir,size=size)
     except (OSError,ValueError,AssertionError,struct.error,zlib.error) as error:
         # Optional scenery must never prevent a verified terrain from loading.
         result['scenery_error']=str(error)
-        (mod_dir/'Maps'/(name+'.decor.lua')).write_text(
+        (mod_dir/folder_name/(name+'.decor.lua')).write_text(
             'return {version=1,error="Original scenery could not be prepared. See the scenery error report."}\n',
             encoding='utf-8',newline='\n')
-        (mod_dir/'Maps'/(name+'.decor-error.txt')).write_text(str(error),encoding='utf-8',newline='\n')
+        (mod_dir/folder_name/(name+'.decor-error.txt')).write_text(str(error),encoding='utf-8',newline='\n')
     progress(100,'Terrain ready')
     return result

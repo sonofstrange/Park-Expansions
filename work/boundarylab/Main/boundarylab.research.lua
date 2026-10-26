@@ -3,6 +3,12 @@
 local g = _G
 local api = g.api
 local R = {Widths={1152,1344,1536,1792,2040}, Heights={400,700,1000,1500,2048}, Costs={12500,25000,50000,100000,200000}}
+function R.MapFolder(world)
+    return world.parkExpansionsTerrainSize==4096 and "Maps4096" or "Maps"
+end
+function R.WidthsFor(world)
+    return world.parkExpansionsTerrainSize==4096 and {1536,2040,2560,3072,4088} or R.Widths
+end
 local wrappers = g.setmetatable({}, {__mode="k"})
 local current
 local loadingWrappers=g.setmetatable({}, {__mode="k"})
@@ -163,7 +169,7 @@ function R.Push()
         g.tostring(world and free(world) or false),
         g.tostring(settings(world).ResearchEnabled),
         g.tostring(settings(world).ManualParkSize or 2040),
-        g.tostring(settings(world).ManualMaxHeight or 2048)},",").."]"
+        g.tostring(settings(world).ManualMaxHeight or 2048),g.tostring(world.parkExpansionsTerrainSize or 2048)},",").."]"
     for wrapper in g.pairs(wrappers) do
         if wrapper:IsReady() then
             g.pcall(function() wrapper:TriggerEventAtNextAdvance("BoundaryLab_State",payload) end)
@@ -187,7 +193,7 @@ function R.ApplyHeight(world,level,configuredMaximum)
     local ceiling=g.math.max(8192,maximum+4096)
     local token=api.entity.CreateRequestCompletionToken()
     local id=api.entity.InstantiatePrefab("ParkBoundaryBox","ParkExpansionsHeightCeiling",token,nil,nil,nil,{
-        HalfSize=Vector3:new(2048,(ceiling-maximum)/2,2048),
+        HalfSize=Vector3:new(world.parkExpansionsTerrainSize or 2048,(ceiling-maximum)/2,world.parkExpansionsTerrainSize or 2048),
         Position=Vector3:new(0,(ceiling+maximum)/2,0),Rotation=Vector3:new(0,0,0)})
     g.assert(id,"Could not create the height ceiling volume")
     local ready=false
@@ -213,14 +219,15 @@ local function validConvertedInfo(info)
     local allowed={['TemperateSandbox.bin']=true,['TropicalSandbox.bin']=true,
         ['TaigaSandbox.bin']=true,['MediterraneanSandbox.bin']=true}
     if g.type(info)~="table" or info.version~=1 or not allowed[info.filename]
+        or (info.terrainSize~=nil and info.terrainSize~=2048 and info.terrainSize~=4096)
         or g.type(info.seed)~="table" or g.type(info.bounds)~="table" then return false end
     for index=1,4 do
         local value=info.bounds[index]
-        if g.type(value)~="number" or value~=value or g.math.abs(value)>1024 then return false end
+        if g.type(value)~="number" or value~=value or g.math.abs(value)>2048 then return false end
     end
     for index=1,3 do
         local value=info.seed[index]
-        if g.type(value)~="number" or value~=value or g.math.abs(value)>1024 then return false end
+        if g.type(value)~="number" or value~=value or g.math.abs(value)>2048 then return false end
     end
     return true
 end
@@ -239,17 +246,20 @@ function R.PrepareMap(world)
     if request and g.type(request.sFileName)=="string" then
         local name=request.sFileName:lower():match("^/run/parks/sandbox/([^/]+)%.bin$")
         biome=names[name]
+        if biome then world.parkExpansionsTerrainSize=4096 end
     elseif token and token.cSaveToken and g.type(api.save.GetSaveMetadata)=="function" then
         if g.type(api.save.IsSaveToken)=="function" and not api.save.IsSaveToken(token.cSaveToken) then return true end
         local ok,metadata=g.pcall(api.save.GetSaveMetadata,token.cSaveToken)
         local save=ok and metadata and metadata.tSave
         local mode=save and g.tostring(save.sGameMode):lower()
         if save and save.parkExpansions and (mode=="sandbox" or mode=="challenge") then
+            world.parkExpansionsTerrainSize=save.parkExpansions.terrainSize or 2048
             local candidate=g.tostring(save.sGeome):lower()
             for _,allowed in g.pairs(names) do if candidate==allowed then biome=candidate end end
         end
     end
-    if not biome or preparedMaps[biome] then return true end
+    local profile=biome and (biome..(world.parkExpansionsTerrainSize==4096 and ":4096" or ""))
+    if not biome or preparedMaps[profile] then return true end
     local function fail(message)
         R.LoadingProgress(false,0,"")
         world.parkExpansionsMapFailed=true
@@ -271,7 +281,7 @@ function R.PrepareMap(world)
         if ok and g.type(value)=="table" then return value end
     end
     R.LoadingProgress(true,0,"Preparing terrain…")
-    local ok,errorMessage=g.pcall(begin,"__prepare_map__","Terrain preparation",biome,nonce)
+    local ok,errorMessage=g.pcall(begin,"__prepare_map__","Terrain preparation",profile,nonce)
     if not ok then return fail(errorMessage) end
     local bridge=read(base.."BridgeInfo.lua")
     if not bridge or bridge.version~=32 or bridge.supported~=true then
@@ -291,8 +301,8 @@ function R.PrepareMap(world)
         end
         if result and result.status=="map_ready" then
             local expected=biome:sub(1,1):upper()..biome:sub(2).."Sandbox.bin"
-            if result.filename~=expected then return fail("Prepared terrain response did not validate.") end
-            preparedMaps[biome]=true
+            if result.filename~=expected or (result.terrainSize or 2048)~=(world.parkExpansionsTerrainSize or 2048) then return fail("Prepared terrain response did not validate.") end
+            preparedMaps[profile]=true
             R.LoadingProgress(false,100,"Terrain ready")
             world.boundaryLabProgress=0
             return true
@@ -413,7 +423,8 @@ function R.ReadConvertedSave(world)
     end
     if not validConvertedInfo(info) then return end
     world.parkExpansionsConverted=info
-    request.sTerrainFileName="/run/Win64/ovldata/Mod_BoundaryLab/Maps/"..info.filename:gsub("%.bin$",".trn")
+    world.parkExpansionsTerrainSize=info.terrainSize or 2048
+    request.sTerrainFileName="/run/Win64/ovldata/Mod_BoundaryLab/"..R.MapFolder(world).."/"..info.filename:gsub("%.bin$",".trn")
 end
 
 function R.InstallCompatibilityHooks()
@@ -426,7 +437,7 @@ function R.InstallCompatibilityHooks()
                 metadata.tSave=metadata.tSave or {}
                 local converted=world.parkExpansionsConverted
                 local template=world.boundaryLabTemplate
-                metadata.tSave.parkExpansions={version=1,filename=s.filename,
+                metadata.tSave.parkExpansions={version=1,filename=s.filename,terrainSize=world.parkExpansionsTerrainSize or 2048,
                     seed=s.seed or (template and template.seed),bounds=s.bounds or (template and template.bounds),
                     sourceHash=converted and converted.sourceHash,sourceName=converted and converted.sourceName}
             end
@@ -488,8 +499,9 @@ function R.AfterLoad(world,templates)
         local template=templates[("/run/parks/sandbox/"..converted.filename):lower()]
         local terrain=api.world.GetWorldAPIs().voxelterrain
         local a,b=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
-        if template and a:GetX()==-1024 and a:GetY()==-2304 and a:GetZ()==-1024
-            and b:GetX()==1023 and b:GetY()==2303 and b:GetZ()==1023 then
+        if template and (a:GetX()==-1024 or a:GetX()==-2048) and a:GetY()==-2304 and a:GetZ()==a:GetX()
+            and b:GetX()==-a:GetX()-1 and b:GetY()==2303 and b:GetZ()==b:GetX() then
+            world.parkExpansionsTerrainSize=-a:GetX()*2
             s.managed=true;s.filename=converted.filename;s.seed=converted.seed;s.bounds=converted.bounds
             world.boundaryLabTemplate=template
             world.boundaryLabTerrainCreated=true
@@ -504,7 +516,8 @@ function R.AfterLoad(world,templates)
         local template=templates[("/run/parks/sandbox/"..s.filename):lower()]
         local w=api.world.GetWorldAPIs()
         local a,b=w.voxelterrain:GetWorldBounds(w.voxelterrain:GetPrimaryVoxelTerrainEntityID())
-        if template and a:GetX()==-1024 and b:GetX()==1023 and b:GetY()==2303 then
+        if template and (a:GetX()==-1024 or a:GetX()==-2048) and b:GetX()==-a:GetX()-1 and b:GetY()==2303 then
+            world.parkExpansionsTerrainSize=-a:GetX()*2
             world.boundaryLabTemplate=template
             world.boundaryLabTerrainCreated=true
         else
@@ -629,7 +642,8 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.48 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.49 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+        .."\nTERRAIN_SIZE="..g.tostring(current.parkExpansionsTerrainSize or 2048)
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
@@ -693,7 +707,7 @@ function R.Advance(world,expand)
                 R.ApplyHeight(world,nil,p.maximum)
                 R.Finish(world,true)
             elseif p.branch=="width" then
-                expand(world,R.Widths[p.level])
+                expand(world,R.WidthsFor(world)[p.level])
                 R.Finish(world,world.boundaryLabCommitResult~=nil,"Boundary rejected. Research points refunded.")
             else
                 R.Progress(world,40,"Applying height upgrade…")

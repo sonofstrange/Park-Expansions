@@ -46,7 +46,7 @@ def baked_heights(path):
     return height,wx,wz
 
 
-def placements(path,baked_heightmap=None):
+def placements(path,baked_heightmap=None,size=2048):
     data = Path(path).read_bytes()
     def require(test):
         if not test: raise ValueError('Unsupported original scenery archive layout')
@@ -139,7 +139,7 @@ def placements(path,baked_heightmap=None):
             require(all(math.isfinite(v) for v in row))
             x, y, z, angle = row
             # Leave the entire original editable square and outer backdrop alone.
-            if 512 <= max(abs(x), abs(z)) < 1020:
+            if 512 <= max(abs(x), abs(z)) < size//2-4:
                 instances.append(row)
         if instances: groups.append(dict(resource=resource, prefab=prefab, instances=instances))
     if target is not None:
@@ -155,21 +155,21 @@ def placements(path,baked_heightmap=None):
     return groups
 
 
-def ensure_scenery(mod_dir, name, game_dir):
+def ensure_scenery(mod_dir, name, game_dir,size=2048):
     biome = name.removesuffix('Sandbox')
     source = game_dir/'Win64/ovldata/Content0/Worlds'/(biome+'World')/(biome+'World.ovl')
     baked = game_dir/'TerrainSkirts'/name/(name+'.bakedHeightMap')
     fingerprint = hashlib.sha256(hashlib.sha256(source.read_bytes()).digest()+hashlib.sha256(baked.read_bytes()).digest()).hexdigest()
-    folder = mod_dir/'Maps'
+    folder = mod_dir/('Maps4096' if size==4096 else 'Maps')
     output = folder/(name+'.decor.lua')
     manifest = folder/(name+'.decor.json')
     try:
         saved = json.loads(manifest.read_text(encoding='utf-8'))
-        if (saved['version'] == VERSION and saved['source'] == fingerprint and
+        if (saved['version'] == VERSION and saved.get('size',2048)==size and saved['source'] == fingerprint and
                 saved['output'] == hashlib.sha256(output.read_bytes()).hexdigest()):
             return saved
     except (OSError, ValueError, KeyError, TypeError): pass
-    groups = placements(source,baked)
+    groups = placements(source,baked,size)
     # Only numbers and strictly validated game identifiers enter this Lua file.
     chunks = ['return {version=1,source="'+fingerprint+'",groups={\n']
     for group in groups:
@@ -180,7 +180,7 @@ def ensure_scenery(mod_dir, name, game_dir):
     data = ''.join(chunks).encode('utf-8')
     temp = output.with_suffix('.lua.pending'); temp.write_bytes(data)
     os.replace(temp, output)
-    report = dict(version=VERSION, source=fingerprint,
+    report = dict(version=VERSION,size=size, source=fingerprint,
                   output=hashlib.sha256(data).hexdigest(),
                   count=sum(len(g['instances']) for g in groups), groups=len(groups))
     temp = manifest.with_suffix('.json.pending')

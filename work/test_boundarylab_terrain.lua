@@ -16,7 +16,7 @@ local function test(label,options)
   GetPrimaryVoxelTerrainEntityID=function() return 11 end,
   GetWorldBounds=function()
    if options.shortHeight then return vec(-1024,-256,-1024),vec(1023,255,1023) end
-   return vec(-1024,-2304,-1024),vec(1023,2303,1023)
+   local half=(options.size or 2048)/2;return vec(-half,-2304,-half),vec(half-1,2303,half-1)
   end,
   RayCast=function(_,id,start,direction,depth)
    assert(id==11 and start:GetY()==2304 and depth==4609,"Incorrect native ground probe")
@@ -40,7 +40,8 @@ local function test(label,options)
   if name=="boundarylab.scenery" then return {BeforeLoad=function()end,AfterLoad=function()end} end
   if name=="boundarylab.research" then
    return {Progress=function() end,Finish=function() end,AddUIHooks=function() end,Advance=function() end,
-    BeforeLoad=function(world)world.parkExpansionsMapFailed=options.mapFail end,AfterLoad=function() end}
+    MapFolder=function()return options.size==4096 and "Maps4096" or "Maps" end,
+    BeforeLoad=function(world)world.parkExpansionsMapFailed=options.mapFail;world.parkExpansionsTerrainSize=options.size or 2048 end,AfterLoad=function() end}
   end
   if name=="Vector3" then return V end
   if name=="Helpers.PopUpDialogUtils" then return {RunOKDialog=function() noticeCount=noticeCount+1 end} end
@@ -50,7 +51,7 @@ local function test(label,options)
  local class={OnAdvance=function() end,OnLoad=function()
   loaded=loaded+1
   if eligible then
-   assert(request.sFileName=="/run/Win64/ovldata/Mod_BoundaryLab/Maps/"..filename,"Not loading the copied map")
+   assert(request.sFileName=="/run/Win64/ovldata/Mod_BoundaryLab/"..(options.size==4096 and "Maps4096" or "Maps").."/"..filename,"Not loading the copied map")
    assert(request.sTerrainFileName==request.sFileName:gsub("%.bin$",".trn"),"Mismatched underlay path")
   else assert(request.sFileName==input,"Changed an ineligible load") end
   if options.failure then error("simulated file load failure") end
@@ -88,3 +89,5 @@ test("non-flat transition at x600 is accepted",{slopedGround=true})
 test("missing stock validation file prevents boundary edit",{missingChecks=true})
 
 test("preparation failure loads original park without partially initialized teardown",{mapFail=true})
+
+test("4K map uses isolated cache and validates 4096-metre bounds",{size=4096})

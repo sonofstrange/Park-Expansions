@@ -1,6 +1,6 @@
 # Executable components and Nexus review
 
-This document describes the 0.48-test source and package; it is not an antivirus certification.
+This document describes the 0.49-test source and package; it is not an antivirus certification.
 
 ## ParkExpansionsBridge.dll
 

@@ -78,7 +78,7 @@ local function wait(test,message)
     g.error(message)
 end
 
-local function validate(data)
+local function validate(data,half)
     g.assert(data and data.version==1,"Original scenery data is unavailable")
     g.assert(not data.error,data.error)
     g.assert(g.type(data.source)=="string" and #data.source==64,"Invalid scenery source hash")
@@ -94,9 +94,9 @@ local function validate(data)
                 g.assert(g.type(value)=="number" and value==value and g.math.abs(value)<10000,"Invalid scenery coordinate")
             end
             local edge=g.math.max(g.math.abs(row[1]),g.math.abs(row[3]))
-            g.assert(edge>=512 and edge<1020,"Scenery placement overlaps the original park or outer backdrop")
+            g.assert(edge>=512 and edge<half-4,"Scenery placement overlaps the original park or outer backdrop")
             count=count+1
-            g.assert(count<=20000,"Too many scenery placements")
+            g.assert(count<=100000,"Too many scenery placements")
         end
     end
     return count
@@ -145,13 +145,14 @@ function S.AfterLoad(world,progress)
     if not filename or not filename:match("^%a+Sandbox%.bin$") then return end
     local w=api.world.GetWorldAPIs()
     local a,b=w.voxelterrain:GetWorldBounds(w.voxelterrain:GetPrimaryVoxelTerrainEntityID())
-    if a:GetX()~=-1024 or a:GetZ()~=-1024 or b:GetX()~=1023 or b:GetZ()~=1023 then return end
+    local half=(world.parkExpansionsTerrainSize or 2048)/2
+    if a:GetX()~=-half or a:GetZ()~=-half or b:GetX()~=half-1 or b:GetZ()~=half-1 then return end
     local preview,changedConstraints,saveControl
     local ok,message=g.pcall(function()
-        local chunk=g.assert(g.loadfile("Win64/ovldata/Mod_BoundaryLab/Maps/"..
+        local chunk=g.assert(g.loadfile("Win64/ovldata/Mod_BoundaryLab/"..(half==2048 and "Maps4096" or "Maps").."/"..
             filename:gsub("%.bin$",".decor.lua"),"t",{}),"Original scenery cache is missing")
         local data=chunk()
-        local count=validate(data)
+        local count=validate(data,half)
         for _,group in g.ipairs(data.groups) do
             for _,row in g.ipairs(group.instances) do
                 g.assert(row[1]>=a:GetX() and row[1]<=b:GetX() and row[2]>=a:GetY() and row[2]<=b:GetY()

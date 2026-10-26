@@ -1,4 +1,4 @@
--- Park Expansions 0.48: extends copied voxel storage; original terrain is retained.
+-- Park Expansions 0.49: extends copied voxel storage; original terrain is retained.
 local g = _G
 local api = g.api
 local M = {}
@@ -144,7 +144,7 @@ end
 
 local function notice(message)
     log(message)
-    local report = "Park Expansions 0.48 report\n" .. g.table.concat(reportLines,"\n")
+    local report = "Park Expansions 0.49 report\n" .. g.table.concat(reportLines,"\n")
     local copied,result = g.pcall(function()
         return api.world.GetWorldAPIs().editors:CopyToClipboard(report)
     end)
@@ -152,7 +152,7 @@ local function notice(message)
         and "\n\nReport copied to clipboard. Paste it in chat with Ctrl+V."
         or "\n\nClipboard unavailable. Short result: " .. g.tostring(M.lastCode or "BL22-ERROR")
     g.require("Helpers.PopUpDialogUtils").RunOKDialog(
-        "[STRING_LITERAL:Value=|Park Expansions 0.48|]",
+        "[STRING_LITERAL:Value=|Park Expansions 0.49|]",
         "[STRING_LITERAL:Value=|" .. message .. hint .. "|]")
 end
 
@@ -177,7 +177,7 @@ local function loadLargeTerrain(self,loader,originalLoad)
     local originalFile,originalTerrainFile = request.sFileName,request.sTerrainFileName
     local filename = originalFile:match("[^/]+$")
     self.boundaryLabFilename = filename
-    request.sFileName = "/run/Win64/ovldata/Mod_BoundaryLab/Maps/" .. filename
+    request.sFileName = "/run/Win64/ovldata/Mod_BoundaryLab/" .. Research.MapFolder(self) .. "/" .. filename
     request.sTerrainFileName = request.sFileName:gsub("%.bin$",".trn")
     loadLog("PRESERVED_LOAD source=" .. originalFile .. " prepared=" .. request.sFileName)
     loadLog("PRESERVATION build verified: original voxel trees, decoded distance/material records and world coordinates preserved; original baked landscape heights and materials; source park preserved")
@@ -192,9 +192,10 @@ local function loadLargeTerrain(self,loader,originalLoad)
     local id = w.voxelterrain:GetPrimaryVoxelTerrainEntityID()
     local minimum,maximum = w.voxelterrain:GetWorldBounds(id)
     loadLog("PRESERVED_TERRAIN min=" .. g.tostring(minimum) .. " max=" .. g.tostring(maximum))
-    if g.math.abs(minimum:GetX()+1024) > 0.1 or g.math.abs(maximum:GetX()-1023) > 0.1
+    local half=(self.parkExpansionsTerrainSize or 2048)/2
+    if g.math.abs(minimum:GetX()+half) > 0.1 or g.math.abs(maximum:GetX()-(half-1)) > 0.1
         or g.math.abs(minimum:GetY()+2304) > 0.1 or g.math.abs(maximum:GetY()-2303) > 0.1
-        or g.math.abs(minimum:GetZ()+1024) > 0.1 or g.math.abs(maximum:GetZ()-1023) > 0.1 then
+        or g.math.abs(minimum:GetZ()+half) > 0.1 or g.math.abs(maximum:GetZ()-(half-1)) > 0.1 then
         notice("Prepared terrain has unexpected bounds; contour unchanged.")
         return result
     end
@@ -202,7 +203,7 @@ local function loadLargeTerrain(self,loader,originalLoad)
     local top = maximum:GetY()+1
     local depth = top-minimum:GetY()+1
     local checks = {}
-    local checkChunk = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Maps/" .. filename:gsub("%.bin$",".checks.lua"),"t",checks)
+    local checkChunk = g.loadfile("Win64/ovldata/Mod_BoundaryLab/" .. Research.MapFolder(self) .. "/" .. filename:gsub("%.bin$",".checks.lua"),"t",checks)
     if not checkChunk then checkChunk = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Maps/GroundChecks.lua","t",checks) end
     local checkOK = checkChunk and g.pcall(checkChunk)
     local expected = checkOK and checks.Heights and checks.Heights[filename]
@@ -227,7 +228,7 @@ end
 local function expand(self,requestedWidth,allowShrink)
     reportLines = {}
     M.lastCode = "BL22-ERROR"
-    log("RUN Park Expansions 0.48")
+    log("RUN Park Expansions 0.49")
     for _,line in g.ipairs(self.boundaryLabLoadLines or {}) do log(line) end
     local cfg = {}
     local chunk, err = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Config.ini", "t", cfg)
@@ -241,7 +242,7 @@ local function expand(self,requestedWidth,allowShrink)
     g.assert(cfg.Mode == "diagnose" or cfg.Mode == "expand" or cfg.Mode == "survey", "Invalid Mode")
     g.assert(g.type(cfg.Factor)=="number","Factor must be a number")
     if allowShrink then g.assert(cfg.Factor>0,"Configured park size must be positive")
-    else g.assert(cfg.Factor>=1.001 and cfg.Factor<=2,"Factor must be between 1.001 and 2.00") end
+    else g.assert(cfg.Factor>=1.001 and cfg.Factor<=(self.parkExpansionsTerrainSize or 2048)/1024,"Expansion factor exceeds this terrain volume") end
     g.assert(cfg.Shape~="rectangle" or allowShrink or cfg.Factor>=1.05,"Rectangle factor must be at least 1.05")
     local w = api.world.GetWorldAPIs()
     g.assert(self.boundaryLabTerrainCreated and self.boundaryLabTemplate,"Not a newly created supported sandbox")
@@ -280,9 +281,8 @@ local function expand(self,requestedWidth,allowShrink)
     end
     local Vector3 = g.require("Vector3")
     local function positionKey(v) return g.string.format("%.4f,%.4f,%.4f",v:GetX(),v:GetY(),v:GetZ()) end
-    -- A native load-time raster has a fixed 2048 x 2048 allocation.
-    -- Keep the final boundary four metres inside the supported terrain edge.
-    local rectangleTargets,rectangleDirections,rectangleHalf = {},{},allowShrink and 512*cfg.Factor or g.math.min(512*cfg.Factor,1020)
+    -- Keep the boundary four metres inside this park's physical terrain edge.
+    local rectangleTargets,rectangleDirections,rectangleHalf = {},{},allowShrink and 512*cfg.Factor or g.math.min(512*cfg.Factor,(self.parkExpansionsTerrainSize or 2048)/2-4)
     if cfg.Shape == "rectangle" then
         -- Traverse the real closed ring; pairs() order and userdata aliases
         -- must not determine which posts become adjacent in the rectangle.
@@ -680,7 +680,7 @@ local function expand(self,requestedWidth,allowShrink)
     end
     M.lastCode = "BL22-COMMIT-OK"
     Research.Progress(self,100,"Park expanded.")
-    self.boundaryLabReport="Park Expansions 0.48 report\n"..g.table.concat(reportLines,"\n")
+    self.boundaryLabReport="Park Expansions 0.49 report\n"..g.table.concat(reportLines,"\n")
     if requestedWidth then return end
     notice((cfg.Shape == "rectangle" and "COMMIT COMPLETE - rectangle " .. rectangleHalf*2 .. " x " .. rectangleHalf*2 .. " m"
         or "COMMIT COMPLETE - contour scaled by " .. cfg.Factor)
@@ -764,5 +764,5 @@ function M.AddLuaHooks(add)
     end)
 end
 
-log("DATABASE LOADED - Park Expansions 0.48 experimental expansion")
+log("DATABASE LOADED - Park Expansions 0.49 experimental expansion")
 return M
