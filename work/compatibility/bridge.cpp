@@ -1,4 +1,4 @@
-// Park Expansions: Lua C-module entry point. No injection, hooks or executable writes.
+// Park Expansions: Lua C-module entry point and version-gated Sea raster fix.
 // The game statically links Lua, so this module returns no Lua values and uses a
 // read-only, version-gated reader for the four string arguments. Results travel
 // through atomic Lua data files read by the game's existing loadfile function.
@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <vector>
 #include <cstdio>
+#include "sea_raster.h"
 
 namespace fs=std::filesystem;
 static HANDLE worker=nullptr;
@@ -40,7 +41,7 @@ static bool supportedGame() {
     auto dos=reinterpret_cast<IMAGE_DOS_HEADER*>(base);
     if(dos->e_magic!=IMAGE_DOS_SIGNATURE) return false;
     auto pe=reinterpret_cast<IMAGE_NT_HEADERS64*>(base+dos->e_lfanew);
-    // Fail closed on a new executable build; never patch or call game addresses.
+    // Fail closed on a new executable build, before conversion or Sea changes.
     return pe->Signature==IMAGE_NT_SIGNATURE && pe->FileHeader.Machine==IMAGE_FILE_MACHINE_AMD64
         && pe->FileHeader.TimeDateStamp==0x6abfabee && pe->OptionalHeader.SizeOfImage==0x130a4000;
 }
@@ -99,6 +100,13 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
         }
         if(!hyphen) return 0;
         status=cache/(L"State-"+wide(nonce)+L".lua");
+        if(std::strcmp(identifier,"__initialize_sea__")==0) {
+            std::string error;
+            if(configureSeaRaster(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)),0x130a4000,error))
+                atomicWrite(status,"return {status=\"sea_ready\",seaRaster=4096}\n");
+            else atomicWrite(status,"return {status=\"error\",message=\""+error+"\"}\n");
+            return 0;
+        }
         if(worker && WaitForSingleObject(worker,0)==WAIT_TIMEOUT) {
             atomicWrite(status,"return {status=\"error\",message=\"Another conversion is still running. Try loading this park again shortly.\"}\n");return 0;
         }
@@ -124,6 +132,10 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
 
 #ifdef BRIDGE_TEST
 #include <cassert>
+extern "C" __declspec(dllexport) int TestSeaRaster(void* image,size_t length) {
+    std::string error;
+    return configureSeaRaster(static_cast<unsigned char*>(image),length,error)?1:0;
+}
 extern "C" __declspec(dllexport) int TestArgumentContract(void* state) {
     char value[4096];
     for(int index=1; index<=4; ++index) if(!readArgument(state,index,value,sizeof(value))) return 0;

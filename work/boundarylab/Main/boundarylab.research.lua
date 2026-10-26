@@ -3,6 +3,28 @@
 local g = _G
 local api = g.api
 local R = {Widths={1152,1344,1536,1792,2040}, Heights={400,700,1000,1500,2048}, Costs={12500,25000,50000,100000,200000}}
+local nativeSea={ready=false,error="Sea raster component has not initialized."}
+function R.NativeSeaReady() return nativeSea.ready end
+function R.InitializeNative()
+    if nativeSea.attempted then return nativeSea.ready end
+    nativeSea.attempted=true
+    local ok,result=g.pcall(function()
+        local begin,message=g.package.loadlib("Win64/ovldata/Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll","Begin")
+        if g.type(begin)~="function" then g.error(message or "Sea raster component is unavailable.") end
+        local nonce=g.tostring(g.math.random(1,1000000000)).."-"..g.tostring(g.math.random(1,1000000000))
+        begin("__initialize_sea__","Sea raster initialization","4096",nonce)
+        local chunk=g.loadfile("Win64/ovldata/Mod_BoundaryLab/AutoConversion/State-"..nonce..".lua","t",{})
+        if not chunk then g.error("Sea raster component did not respond. Check the installed bridge DLL.") end
+        local status=chunk()
+        if g.type(status)~="table" or status.status~="sea_ready" or status.seaRaster~=4096 then
+            g.error(g.type(status)=="table" and status.message or "Sea raster response did not validate.")
+        end
+        return true
+    end)
+    nativeSea.ready=ok and result==true
+    nativeSea.error=not nativeSea.ready and g.tostring(result) or nil
+    return nativeSea.ready
+end
 function R.MapFolder(world)
     return world.parkExpansionsTerrainSize==4096 and "Maps4096" or "Maps"
 end
@@ -259,13 +281,17 @@ function R.PrepareMap(world)
         end
     end
     local profile=biome and (biome..(world.parkExpansionsTerrainSize==4096 and ":4096" or ""))
-    if not biome or preparedMaps[profile] then return true end
+    if not biome then return true end
     local function fail(message)
         R.LoadingProgress(false,0,"")
         world.parkExpansionsMapFailed=true
         world.parkExpansionsAutoError=g.tostring(message)
         return false
     end
+    if world.parkExpansionsTerrainSize==4096 and not nativeSea.ready then
+        return fail(nativeSea.error or "Sea raster fix is unavailable; 4K loading stopped.")
+    end
+    if preparedMaps[profile] then return true end
     if not g.package or g.type(g.package.loadlib)~="function" then
         return fail("Terrain preparation component is unavailable.")
     end
@@ -317,7 +343,8 @@ function R.PrepareMap(world)
     return fail("Terrain preparation is still running. Try loading the park again after it finishes.")
 end
 
--- The C-module only starts the bundled worker. It never writes game memory.
+-- Conversion requests start the worker; the separate startup request configures
+-- the native Sea raster before any park loads.
 -- Conversion completes before the native loader sees any world data.
 function R.AutoConvert(world)
     local manager=world.parkLoadSaveManager
@@ -642,8 +669,10 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.49 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.50 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_SIZE="..g.tostring(current.parkExpansionsTerrainSize or 2048)
+        .."\nSEA_RASTER="..g.tostring(nativeSea.ready and 4096 or "unavailable")
+        .."\nSEA_RASTER_ERROR="..g.tostring(nativeSea.error)
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)

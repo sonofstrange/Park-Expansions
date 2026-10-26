@@ -16,7 +16,7 @@ require=function(name)
     if name=="forgeutils.uihookmanager" then return {AddImportHook=function(_,view,path)
         assert((view=="HUD" and path=="/js/boundarylab/research.js") or (view=="LoadingScreen" and path=="/js/boundarylab/loading.js"))end}end
     if name=="forgeutils.hookmanager" then return {AddHook=function(_,module,name,fn)
-        if module=="LoadingScreenWorld"then return end
+        if module=="UI.LoadingScreenUI"then return end
         assert(module=="UI.GamefaceUIWrapper");hooks[name]=fn end}end
     return originalRequire(name)
 end
@@ -26,9 +26,10 @@ assert(hooks._OnReadyCallback(function()return 42 end,wrapper)==42)
 assert(listeners.BoundaryLab_RequestState.count==0 and listeners.BoundaryLab_Purchase.count==2
     and listeners.BoundaryLab_Report.count==0)
 listeners.BoundaryLab_RequestState.callback()
-assert(captured:sub(1,1)=="[")
+assert(captured==nil,"Pending world must not emit research state")
 local world={}
 R.BeforeLoad(world)
+world.parkExpansionsParkReady=true
 R.Progress(world,17.25,'Quote " and slash \\ and newline\ncontrol\1 and текст')
 local file=assert(io.open('work/bridge-payload.json','wb'));file:write(captured);file:close()
 hooks.Shutdown(function()end,wrapper)

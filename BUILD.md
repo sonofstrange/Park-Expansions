@@ -1,4 +1,4 @@
-# Building Park Expansions 0.41-test
+# Building Park Expansions 0.50-test
 
 Run commands from the repository root on **64-bit Windows**. Source for every mod-specific compiled component is included. The earlier release terrain files remain checked in as regression references. The small package excludes them and generates its own cache at first use. No game executable or save is needed to compile the DLL or worker.
 
@@ -11,6 +11,14 @@ tools\build_native.cmd
 ```
 
 This compiles `work/compatibility/bridge.cpp` using MSVC `/std:c++17 /EHsc /O2 /MT /LD`, builds and runs the argument-reader tests, then copies the DLL into the staged mod. The published DLL was built with Visual Studio 18 Community. The bridge test is a build artifact, not part of the mod.
+
+The 0.50-test bridge includes `sea_raster.h` / `sea_raster_plan.h`, a version-pinned in-memory Sea raster fix. See [REVIEW.md](REVIEW.md) for its scope and checks. The build also creates `build/bridge_contract.dll` with test-only exports; it is never packaged. To validate the instruction plan and permission transaction against a locally installed supported executable, without running or modifying the game:
+
+```bat
+python -m pip install pefile capstone
+python work\test_sea_raster.py --game-exe "D:\SteamLibrary\steamapps\common\Planet Coaster 2\PlanetCoaster2.exe"
+python work\test_native_argument_contract.py
+```
 
 ## Conversion worker EXE
 

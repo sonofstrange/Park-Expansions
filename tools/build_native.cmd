@@ -13,4 +13,6 @@ cl /nologo /std:c++17 /EHsc /O2 /MT /DBRIDGE_TEST work\compatibility\bridge.cpp 
 if errorlevel 1 exit /b 1
 build\bridge_test.exe
 if errorlevel 1 exit /b 1
+cl /nologo /std:c++17 /EHsc /O2 /MT /LD /DBRIDGE_TEST work\compatibility\bridge.cpp /Febuild\bridge_contract.dll /Fobuild\bridge_contract.obj /link /DYNAMICBASE /NXCOMPAT
+if errorlevel 1 exit /b 1
 copy /y build\ParkExpansionsBridge.dll work\boundarylab\Mod_BoundaryLab\Compatibility\ParkExpansionsBridge.dll >nul

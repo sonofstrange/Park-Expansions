@@ -1,6 +1,7 @@
 local nativeLoadfile=loadfile
 local function test(kind)
  local calls,yields=0,0
+ local nativeRequest=false
  local progress={}
  api={save={GetSaveMetadata=function()return{tSave={sGameMode="sandbox",sGeome="taiga",parkExpansions=kind=="converted" and {} or kind=="saved4k" and {terrainSize=4096} or nil}}end}}
  local R=assert(nativeLoadfile('work/boundarylab/Main/boundarylab.research.lua'))()
@@ -9,13 +10,15 @@ local function test(kind)
   assert(symbol=="Begin")
   return function(identifier,name,biome,nonce)
    for _,value in ipairs({identifier,name,biome,nonce})do assert(type(value)=="string" and #value>0,"Native bridge rejects empty arguments")end
+   nativeRequest=identifier=="__initialize_sea__"
+   if nativeRequest then return end
    calls=calls+1;assert(identifier=="__prepare_map__" and name=="Terrain preparation" and biome==(kind=="converted" and "taiga" or "taiga:4096"))
   end
  end
  loadfile=function(path,mode,env)
   assert(mode=="t" and type(env)=="table")
   if path:find("BridgeInfo",1,true)then return function()return{version=32,supported=true}end end
-  if path:find("State-",1,true)then return function()return{status="working"}end end
+  if path:find("State-",1,true)then return function()return nativeRequest and {status="sea_ready",seaRaster=4096} or {status="working"}end end
   if path:find("Progress-",1,true)then return function()return{status="working",progress=37,message="Reading terrain"}end end
   if path:find("Result-",1,true)then
    if yields==0 then return nil end
@@ -26,6 +29,7 @@ local function test(kind)
   end
   return nil
  end
+ assert(R.InitializeNative())
  local world={parkLoadSaveManager={tLoadParkFromFileRequest={sFileName="/run/Parks/Sandbox/TaigaSandbox.bin"}}}
  if kind=="unsupported"then world.parkLoadSaveManager.tLoadParkFromFileRequest.sFileName="/run/Parks/Scenarios/TaigaSandbox.bin"end
  if kind=="old" or kind=="converted" or kind=="saved4k" then world.parkLoadSaveManager={tLoadParkFromSaveTokenRequest={cSaveToken={}}}end

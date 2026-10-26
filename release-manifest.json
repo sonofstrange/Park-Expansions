@@ -1,8 +1,8 @@
 {
-  "version": "0.49-test",
-  "archive": "Park-Expansions-0.49-test.zip",
-  "archive_sha256": "d81d4d5b190d9a8c0f8974e50c91017600497268f27d5716b510358253d0c25a",
-  "bytes": 23359665,
+  "version": "0.50-test",
+  "archive": "Park-Expansions-0.50-test.zip",
+  "archive_sha256": "b9ecc816ab4be8170dbf6a183c54a1eead387a7c2d1fe4acd944d587661cd4c5",
+  "bytes": 23362339,
   "file_sha256": {
     "Mod_BoundaryLab/Compatibility/AutoWorker/ParkExpansionsWorker.exe": "c647f0fed53b9e6fa363826a045055ac806543b213bc5cee0b363a85a91a017e",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/81d243bd2c585b0f4821__mypyc.cp314-win_amd64.pyd": "ab64835b63093c31975df2692756c8008e7ec190e4aa86f15a713bcc62e1d432",
@@ -119,11 +119,11 @@
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/unicodedata.pyd": "0d4f124b2d6622d276d777f7106972219f9b310edb5df8149c253da7c013d6d8",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/win32/win32pdh.pyd": "cfd8e33ef60f73b77d3b5751dbd1755e337037eb6544dba5e234ec3cba503473",
     "Mod_BoundaryLab/Compatibility/AutoWorker/_internal/yaml/_yaml.cp314-win_amd64.pyd": "ef5cde08b05f7c8222a458fa49ca5ec891e54d4c721ffdbe1d6a609e26a26718",
-    "Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll": "6d669fedbec221478fa5253930581ed0ca59d8481f72d2fc913912e98bab0b9f",
+    "Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll": "c27e5130de4e4e9d55483e51107dba1bdc3ddd802d296d65cbf6a243fa0f09ab",
     "Mod_BoundaryLab/Compatibility/PyInstaller-COPYING.txt": "dcf75fdb959db1e3b41c0f8505069d2ece781b5ec6b3d0a4d30975cfc6580245",
     "Mod_BoundaryLab/Compatibility/Python-LICENSE.txt": "935cf13e19f8c31b497d20b05d73623431a226b230c3599bc30fa3348979bc68",
-    "Mod_BoundaryLab/Config.ini": "402a7d06dece826705b0316bb60d3ae2a785a65eb78fdafaa4b485ec6075dee2",
-    "Mod_BoundaryLab/Main.ovl": "120b5b0af575e7ae8b0846c1a73e5b11b222d7d93b91250fa565d0fb7e94c666",
+    "Mod_BoundaryLab/Config.ini": "31d1848970fa90b9263cf5fb244996bb9d6fc34f270e2fdd817ccec5c16d31e2",
+    "Mod_BoundaryLab/Main.ovl": "82bc62683884b9893dc3928474f24cbe55877e73342fc41b65798957ad76fc8d",
     "Mod_BoundaryLab/Manifest.xml": "43841d0e4785ef45e81079e19687b6c45f2146467aed9c15bd08edaa14fcb24a"
   }
 }
