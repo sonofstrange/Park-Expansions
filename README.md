@@ -18,9 +18,9 @@ Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open
 
 ## Compatibility
 
-Development version **0.41-test**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
+Release version **0.51**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
 
-The maximum tested buildable width is 2040 m, leaving a 4 m margin at each terrain edge. Setting 4096 in the config does not generate a larger terrain.
+The maximum buildable width is 2040 m on standard 2K maps and 4088 m on 4K maps, leaving a 4 m safety margin at each terrain edge.
 
 ## Configuration
 
@@ -132,8 +132,12 @@ This native change supports only game build 1.11.3.986758, with both complete fu
 Offline checks validate all 38 instruction edits in private memory buffers, original/replacement fingerprints, rejection without partial changes, repeated initialization, CPU/GPU agreement and the crash index for 1024/2048/4096 worlds. They do not run the game. In-game validation of 0.50 remains pending. This is a test build, not an update to the public 0.35 release. See [REVIEW.md](REVIEW.md) for the changed native behavior.
 
 
-### 0.51 test: bounded 4K reflection grid
+### 0.51: bounded 4K reflection grid, configurable 4K maps, and extended research
 
-The 0.50 manual run reached environment reflection creation and exhausted the engine's symbol IDs at `CapturePoint_CurrentSpecular_3709`. The stock 60 m reflection grid creates 5265 points over the enlarged terrain. This build increases its distribution/coverage radius for 4K maps, keeping the working 2K budget of 1306 points across the full map. Reflection sampling is consequently coarser on 4K; no outer territory is removed. Stock and 2K grid calls retain their original parameters. Terrain, scenery, native Sea fix and saved data are unchanged.
+The 0.50 manual run reached environment reflection creation and exhausted the engine's symbol IDs at `CapturePoint_CurrentSpecular_3709`. The stock 60 m reflection grid creates 5265 points over the enlarged terrain. This build increases its distribution/coverage radius for 4K maps, keeping the working 2K budget of 1306 points across the full map. Reflection sampling is consequently coarser on 4K; no outer territory is removed. Stock and 2K grid calls retain their original parameters.
 
-Tests check exact stock-layout point counts, full-bound forwarding, native token/extra arguments, coroutine yields, entity-list identity and unchanged 1024/2048 behavior. Report diagnostics are `ENV_CAPTURE_SPAN`, `ENV_CAPTURE_RADIUS` and `ENV_CAPTURE_POINTS`. Native loading/rendering still requires an in-game test of this build.
+In addition, 0.51 introduces:
+- `Enable4KMap = false` configuration option in `Config.ini` (standard 2K is default; 4K is optional with resource warnings).
+- Extended 7-tier research tree for 4K maps: Tier VI (3072 m for 400,000 points) and Tier VII (4088 m for 800,000 points).
+- Dynamic UI updates for 2K (5 tiers) and 4K (7 tiers).
+- Diagnostics reported in `Copy Report`: `ENV_CAPTURE_SPAN`, `ENV_CAPTURE_RADIUS`, `ENV_CAPTURE_POINTS`, `ENABLE_4K_MAP`, `MAX_MAP_SIZE`.

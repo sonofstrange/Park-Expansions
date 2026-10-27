@@ -1,6 +1,6 @@
 # Executable components and Nexus review
 
-This document describes the 0.51-test source and package; it is not an antivirus certification.
+This document describes the 0.51 release source and package; it is not an antivirus certification.
 
 ## ParkExpansionsBridge.dll
 
@@ -8,7 +8,7 @@ Source: [`work/compatibility/bridge.cpp`](work/compatibility/bridge.cpp).
 
 Loaded through Lua `package.loadlib`. Reads four Lua string arguments using a read-only, version-gated reader with Windows structured exception handling. Checks the host PE timestamp and image size before enabling conversion. It launches the bundled worker hidden through `CreateProcessW`, and exchanges progress/results with Lua through files under the mod's `AutoConversion` directory.
 
-**0.50-test introduced an in-process code modification for 4K maps, retained unchanged in 0.51-test.** The startup request adjusts 38 immediate operands in two native Sea heightmap routines in game build 1.11.3.986758. Sources: [`sea_raster.h`](work/compatibility/sea_raster.h) and [`sea_raster_plan.h`](work/compatibility/sea_raster_plan.h). Full-function fingerprints and exact original instruction bytes must match before any write. The changes coordinate CPU allocations, dimensions, centering, row strides, GPU texture dimensions and shader size/reciprocal values. It temporarily changes page protections through `VirtualProtect`, restores them and flushes the instruction cache. It does not install detours, call game code addresses, modify protected/packed code or write the game EXE on disk.
+**0.50 introduced an in-process code modification for 4K maps, retained in 0.51.** The startup request adjusts 38 immediate operands in two native Sea heightmap routines in game build 1.11.3.986758. Sources: [`sea_raster.h`](work/compatibility/sea_raster.h) and [`sea_raster_plan.h`](work/compatibility/sea_raster_plan.h). Full-function fingerprints and exact original instruction bytes must match before any write. The changes coordinate CPU allocations, dimensions, centering, row strides, GPU texture dimensions and shader size/reciprocal values. It temporarily changes page protections through `VirtualProtect`, restores them and flushes the instruction cache. It does not install detours, call game code addresses, modify protected/packed code or write the game EXE on disk.
 
 Initialization runs when the mod database loads, before park managers are created. The enlarged Sea raster remains active for the process, including subsequent smaller parks. A missing/mismatched component blocks 4K loading; a new park can load its original template. Loading an existing 4K save is stopped rather than passing its oversized data to the unmodified Sea routine. This is an experimental native fix; offline checks do not establish in-game compatibility. Unlike the published 0.35 release, this test DLL changes executable memory and may receive additional scanner scrutiny.
 
