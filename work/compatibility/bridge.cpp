@@ -261,18 +261,9 @@ struct ClientArchiveInfo {
 };
 
 static std::vector<uint8_t> unpack_game_save(const std::vector<uint8_t>& data, std::vector<uint8_t>& preamble) {
-    if (data.size() < 12 || std::memcmp(data.data(), "FRES", 4) != 0) {
-        throw std::runtime_error("Invalid game save format");
-    }
-    size_t p = 12;
-    for (int i = 0; i < 3; ++i) {
-        size_t pos = 0;
-        read_uint(data.data() + p, data.size() - p, pos);
-        p += pos;
-    }
-    p += 8;
-    preamble.assign(data.begin(), data.begin() + p);
-    return decompress_zlib(data.data() + p, data.size() - p, -15);
+    if (data.size() < 17) throw std::runtime_error("File too small");
+    preamble.assign(data.begin(), data.begin() + 17);
+    return decompress_zlib(data.data() + 17, data.size() - 17, -15);
 }
 
 static ClientArchiveInfo parse_clients(const std::vector<uint8_t>& raw) {
