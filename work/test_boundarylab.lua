@@ -176,7 +176,7 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
         if module=="Helpers.PopUpDialogUtils" then
             return {RunOKDialog=function(_,message)
                 popupCount=popupCount+1
-                assert(clipboardReport and clipboardReport:find("Park Expansions 0.50 report",1,true),"Missing clipboard report")
+                assert(clipboardReport and clipboardReport:find("Park Expansions 0.51 report",1,true),"Missing clipboard report")
                 assert(clipboardReport:find("CONNECTED posts="..#posts.." panels="..#panels,1,true),"Missing contour diagnosis")
                 if not allowCommit then assert(message:find("outsideBounds=true",1,true),"Lost rejection details") end
                 if controlAccepted then assert(message:find("Unchanged contour: accepted",1,true),"Lost control result") end
@@ -324,7 +324,7 @@ end
 test("manual size shrinks known boundary 1792 -> 512", "My test",true,nil,nil,nil,nil,nil,"taigasandbox.bin",nil,"rectangle",{from=1792,to=512,manual=true})
 test("manual size 3000 accepted by config path but rejected by actual terrain without clamping", "My test",true,nil,nil,nil,nil,nil,"taigasandbox.bin",nil,"rectangle",{from=1792,to=3000,manual=true,outsideTerrain=true})
 
-local largeWidths={1536,2040,2560,3072,4088}
+local largeWidths={1152,1344,1536,1792,2040,3072,4088}
 for i,width in ipairs(largeWidths) do
  test("4K research boundary -> "..width,"My test",true,nil,nil,nil,nil,nil,"taigasandbox.bin",nil,"rectangle",{from=i==1 and 0 or largeWidths[i-1],to=width,size=4096})
 end

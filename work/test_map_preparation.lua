@@ -12,7 +12,8 @@ local function test(kind)
    for _,value in ipairs({identifier,name,biome,nonce})do assert(type(value)=="string" and #value>0,"Native bridge rejects empty arguments")end
    nativeRequest=identifier=="__initialize_sea__"
    if nativeRequest then return end
-   calls=calls+1;assert(identifier=="__prepare_map__" and name=="Terrain preparation" and biome==(kind=="converted" and "taiga" or "taiga:4096"))
+   local expected4k = kind=="saved4k" or kind=="fresh4k"
+   calls=calls+1;assert(identifier=="__prepare_map__" and name=="Terrain preparation" and biome==(expected4k and "taiga:4096" or "taiga"))
   end
  end
  loadfile=function(path,mode,env)
@@ -24,13 +25,15 @@ local function test(kind)
    if yields==0 then return nil end
    return function()
     if kind=="failure"then return{status="error",message="Disk unavailable"}end
-    return{status="map_ready",terrainSize=kind=="converted" and 2048 or 4096,filename=kind=="invalid" and "../other.bin" or "TaigaSandbox.bin"}
+    local expected4k = kind=="saved4k" or kind=="fresh4k"
+    return{status="map_ready",terrainSize=expected4k and 4096 or 2048,filename=kind=="invalid" and "../other.bin" or "TaigaSandbox.bin"}
    end
   end
   return nil
  end
  assert(R.InitializeNative())
  local world={parkLoadSaveManager={tLoadParkFromFileRequest={sFileName="/run/Parks/Sandbox/TaigaSandbox.bin"}}}
+ if kind=="fresh4k" then world.parkExpansionsConfig={Enable4KMap=true,MaxMapSize=4096} end
  if kind=="unsupported"then world.parkLoadSaveManager.tLoadParkFromFileRequest.sFileName="/run/Parks/Scenarios/TaigaSandbox.bin"end
  if kind=="old" or kind=="converted" or kind=="saved4k" then world.parkLoadSaveManager={tLoadParkFromSaveTokenRequest={cSaveToken={}}}end
  local result
@@ -51,7 +54,7 @@ local function test(kind)
  loadfile=nativeLoadfile
  print("PASS map preparation "..kind)
 end
-for _,kind in ipairs({"fresh","converted","saved4k","old","unsupported","failure","invalid"})do test(kind)end
+for _,kind in ipairs({"fresh","fresh4k","converted","saved4k","old","unsupported","failure","invalid"})do test(kind)end
 
 local registered=false
 api={world={GetWorldAPIs=function()return{worldserialisation={RegisterWorldSerialisationClient=function()registered=true end}}end}}

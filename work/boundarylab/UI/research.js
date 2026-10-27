@@ -10,14 +10,16 @@ loadCSS('boundarylab/Research');
 
 export let WIDTHS = [1152, 1344, 1536, 1792, 2040];
 export const HEIGHTS = [400, 700, 1000, 1500, 2048];
-export const COSTS = [12500, 25000, 50000, 100000, 200000];
+export let WIDTH_COSTS = [12500, 25000, 50000, 100000, 200000];
+export const HEIGHT_COSTS = [12500, 25000, 50000, 100000, 200000];
+export const COSTS = WIDTH_COSTS;
 let snapshot = {managed:false, width:0, height:0, points:0, busy:false, progress:0,
     message:'Connecting to park…', free:false, researchEnabled:true, manualSize:2040, manualHeight:2048};
 const panels = new Set();
 const literal = text => `[STRING_LITERAL:Value=|${text}|]`;
 
 const pointsText = value => String(Math.floor(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-const ROMAN = ['I','II','III','IV','V'];
+const ROMAN = ['I','II','III','IV','V','VI','VII'];
 const branchTitle = name => name==='width' ? 'Park Size' : 'Height';
 const dimension = (name,value) => name==='width' ? value+' × '+value+' m' : 'Y='+value+' m';
 
@@ -27,14 +29,17 @@ class ExpansionPanel extends preact.Component {
     componentWillUnmount() { panels.delete(this); }
     selected() {
         const branch=this.state.branch;
-        return {branch, level:this.state.level || Math.min(snapshot[branch]+1,5)};
+        const maxLevel=branch==='width' ? WIDTHS.length : 5;
+        return {branch, level:this.state.level || Math.min(snapshot[branch]+1,maxLevel)};
     }
     upgrade(name,level) {
         const unlocked=snapshot[name], index=level-1;
         const purchased=level<=unlocked, next=level===unlocked+1;
         const restore=level===unlocked && unlocked>0;
+        const costs=name==='width' ? WIDTH_COSTS : HEIGHT_COSTS;
+        const cost=costs[index] || 0;
         const allowed=snapshot.researchEnabled && snapshot.managed && !snapshot.busy
-            && (next || restore) && (restore || snapshot.free || snapshot.points>=COSTS[index]);
+            && (next || restore) && (restore || snapshot.free || snapshot.points>=cost);
         let label,reason,status;
         if (!snapshot.managed) {
             label='Unavailable for this park';reason='';status='Unavailable';
@@ -51,8 +56,8 @@ class ExpansionPanel extends preact.Component {
         } else if (snapshot.free) {
             label='Unlock for free';reason='Research disabled in sandbox settings.';status='Available';
         } else {
-            label='Research · '+pointsText(COSTS[index])+' points';
-            reason=allowed ? '' : 'Requires '+pointsText(COSTS[index]-snapshot.points)+' more points.';
+            label='Research · '+pointsText(cost)+' points';
+            reason=allowed ? '' : 'Requires '+pointsText(cost-snapshot.points)+' more points.';
             status=allowed ? 'Available' : 'Not enough points';
         }
         return {name,level,index,purchased,next,restore,allowed,label,reason,status,
@@ -60,10 +65,12 @@ class ExpansionPanel extends preact.Component {
     }
     branch(name) {
         const selected=this.selected(),unlocked=snapshot[name];
+        const maxLevel=name==='width' ? WIDTHS.length : 5;
+        const costs=name==='width' ? WIDTH_COSTS : HEIGHT_COSTS;
         return preact.h('div',{className:'BL_branch'},
             preact.h('div',{className:'BL_branchHeading'},
                 preact.h('div',{className:'BL_branchTitle'},branchTitle(name)),
-                preact.h('div',{className:'BL_branchCount'},unlocked+' / 5 researched')),
+                preact.h('div',{className:'BL_branchCount'},unlocked+' / '+maxLevel+' researched')),
             (name==='width' ? WIDTHS : HEIGHTS).map((value,index)=>{
                 const level=index+1,u=this.upgrade(name,level);
                 const active=selected.branch===name && selected.level===level;
@@ -74,7 +81,7 @@ class ExpansionPanel extends preact.Component {
                     preact.h(Button,{rootClassName:classes,
                         label:literal(dimension(name,value)),
                         subLabel:literal(branchTitle(name)+' '+ROMAN[index]+' · '+
-                            (u.purchased?'Researched':snapshot.free?'Free':pointsText(COSTS[index])+' points')),
+                            (u.purchased?'Researched':snapshot.free?'Free':pointsText(costs[index])+' points')),
                         icon:u.purchased?'/img/icons/tick.svg':'/img/icons/researchPoints.svg',
                         modifiers:'inverted',disabled:snapshot.busy,
                         onSelect:()=>this.setState({branch:name,level})}));
@@ -201,7 +208,13 @@ export function receiveState(payload) {
     if (typeof researchEnabled!=='boolean' || ![manualSize,manualHeight].every(Number.isFinite)) return;
     const terrainSize=values.length===12 ? values[11] : 2048;
     if (terrainSize!==2048 && terrainSize!==4096) return;
-    WIDTHS=terrainSize===4096 ? [1536,2040,2560,3072,4088] : [1152,1344,1536,1792,2040];
+    if (terrainSize===4096) {
+        WIDTHS=[1152, 1344, 1536, 1792, 2040, 3072, 4088];
+        WIDTH_COSTS=[12500, 25000, 50000, 100000, 200000, 400000, 800000];
+    } else {
+        WIDTHS=[1152, 1344, 1536, 1792, 2040];
+        WIDTH_COSTS=[12500, 25000, 50000, 100000, 200000];
+    }
     snapshot={managed,width,height,points,busy,progress,message,free,researchEnabled,manualSize,manualHeight,terrainSize};
     panels.forEach(panel=>panel.enqueueForceUpdate());
     updateOverlay();

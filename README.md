@@ -28,13 +28,16 @@ The maximum tested buildable width is 2040 m, leaving a 4 m margin at each terra
 
 ```lua
 ResearchEnabled = true
+Enable4KMap = false
 ManualParkSize = 2040
 ManualMaxHeight = 2048
 ```
 
+Set `Enable4KMap = true` (or `MaxMapSize = 4096`) to enable experimental 4096 × 4096 m maps for new sandboxes. By default, this option is disabled (`false` / 2048 m). **Warning:** 4K maps require significantly longer initial generation and loading times, and use substantially more RAM, VRAM, and CPU resources. Existing saves retain their original terrain size.
+
 Set `ResearchEnabled = false` to hide the upgrade tree and apply manual limits when loading the park. Reload after editing. Heights are absolute world Y coordinates. Values above 2048 may be unstable and remain subject to engine and loaded-terrain limits.
 
-Each branch costs 12,500 / 25,000 / 50,000 / 100,000 / 200,000 research points. Upgrades are free if research is disabled by the game's Sandbox settings.
+Each branch costs 12,500 / 25,000 / 50,000 / 100,000 / 200,000 research points. On 4K maps, the park size branch extends with Tier VI (3072 m, 400,000 points) and Tier VII (4088 m, 800,000 points). Upgrades are free if research is disabled by the game's Sandbox settings.
 
 ## Experimental
 
@@ -127,3 +130,10 @@ The 0.49 manual test crashed in the native Sea heightmap builder. A 4096 m terra
 This native change supports only game build 1.11.3.986758, with both complete function fingerprints and every original instruction checked before writing. A mismatch prevents 4K loading. Fresh parks can fall back to their original template; an existing 4K save is stopped before native loading. `Copy Report` includes `SEA_RASTER` and `SEA_RASTER_ERROR`. Existing research tiers, configuration, generated caches and scenery restoration are retained.
 
 Offline checks validate all 38 instruction edits in private memory buffers, original/replacement fingerprints, rejection without partial changes, repeated initialization, CPU/GPU agreement and the crash index for 1024/2048/4096 worlds. They do not run the game. In-game validation of 0.50 remains pending. This is a test build, not an update to the public 0.35 release. See [REVIEW.md](REVIEW.md) for the changed native behavior.
+
+
+### 0.51 test: bounded 4K reflection grid
+
+The 0.50 manual run reached environment reflection creation and exhausted the engine's symbol IDs at `CapturePoint_CurrentSpecular_3709`. The stock 60 m reflection grid creates 5265 points over the enlarged terrain. This build increases its distribution/coverage radius for 4K maps, keeping the working 2K budget of 1306 points across the full map. Reflection sampling is consequently coarser on 4K; no outer territory is removed. Stock and 2K grid calls retain their original parameters. Terrain, scenery, native Sea fix and saved data are unchanged.
+
+Tests check exact stock-layout point counts, full-bound forwarding, native token/extra arguments, coroutine yields, entity-list identity and unchanged 1024/2048 behavior. Report diagnostics are `ENV_CAPTURE_SPAN`, `ENV_CAPTURE_RADIUS` and `ENV_CAPTURE_POINTS`. Native loading/rendering still requires an in-game test of this build.

@@ -1,6 +1,6 @@
 # Executable components and Nexus review
 
-This document describes the 0.50-test source and package; it is not an antivirus certification.
+This document describes the 0.51-test source and package; it is not an antivirus certification.
 
 ## ParkExpansionsBridge.dll
 
@@ -8,7 +8,7 @@ Source: [`work/compatibility/bridge.cpp`](work/compatibility/bridge.cpp).
 
 Loaded through Lua `package.loadlib`. Reads four Lua string arguments using a read-only, version-gated reader with Windows structured exception handling. Checks the host PE timestamp and image size before enabling conversion. It launches the bundled worker hidden through `CreateProcessW`, and exchanges progress/results with Lua through files under the mod's `AutoConversion` directory.
 
-**0.50-test adds an in-process code modification for 4K maps.** The startup request adjusts 38 immediate operands in two native Sea heightmap routines in game build 1.11.3.986758. Sources: [`sea_raster.h`](work/compatibility/sea_raster.h) and [`sea_raster_plan.h`](work/compatibility/sea_raster_plan.h). Full-function fingerprints and exact original instruction bytes must match before any write. The changes coordinate CPU allocations, dimensions, centering, row strides, GPU texture dimensions and shader size/reciprocal values. It temporarily changes page protections through `VirtualProtect`, restores them and flushes the instruction cache. It does not install detours, call game code addresses, modify protected/packed code or write the game EXE on disk.
+**0.50-test introduced an in-process code modification for 4K maps, retained unchanged in 0.51-test.** The startup request adjusts 38 immediate operands in two native Sea heightmap routines in game build 1.11.3.986758. Sources: [`sea_raster.h`](work/compatibility/sea_raster.h) and [`sea_raster_plan.h`](work/compatibility/sea_raster_plan.h). Full-function fingerprints and exact original instruction bytes must match before any write. The changes coordinate CPU allocations, dimensions, centering, row strides, GPU texture dimensions and shader size/reciprocal values. It temporarily changes page protections through `VirtualProtect`, restores them and flushes the instruction cache. It does not install detours, call game code addresses, modify protected/packed code or write the game EXE on disk.
 
 Initialization runs when the mod database loads, before park managers are created. The enlarged Sea raster remains active for the process, including subsequent smaller parks. A missing/mismatched component blocks 4K loading; a new park can load its original template. Loading an existing 4K save is stopped rather than passing its oversized data to the unmodified Sea routine. This is an experimental native fix; offline checks do not establish in-game compatibility. Unlike the published 0.35 release, this test DLL changes executable memory and may receive additional scanner scrutiny.
 
@@ -37,3 +37,10 @@ NumPy's license notices are included with the frozen runtime. The generated file
 ## Scenery preservation in 0.43
 
 `stock_scenery.py` reads only the selected original biome-world OVL with a bounded, layout-checked ZLIB reader. It writes a checksummed `.decor.lua` cache and manifest under `Maps`. `boundarylab.scenery.lua` imports those transforms as native editable scenery parts during loading. A new `ParkExpansionsScenery` serialization client records completion; the native placement clients save the actual objects. Generation does not modify the original world OVL, source parks, terrain files or saves.
+
+
+## 0.51 capture-grid budget
+
+The 0.50 manual test passed the previous Sea crash location and terminated later with `fSymbolTable out of memory or IDs` while creating `CapturePoint_CurrentSpecular_3709`. The stock CPTWorld loader creates an environment reflection grid with a fixed 60 m distribution radius over the full voxel bounds. Its staggered layout produces 5265 capture points for the 4095 m span, versus 1306 for the working 2047 m span.
+
+The Lua hook on `CommonObjectCreator.CreateEnvironmentCaptureGrid` scales that radius by `max(1, span / 2048)` only for the 4096 m profile. Full bounds, height, native completion token, result entities and stock cleanup are preserved. It also scales each point's native coverage radius through the original creator. The 4K grid then has 1306 points. No additional native code changes, symbol-table edits, resource-name reuse, terrain changes or save-format changes are involved. `Copy Report` includes the actual span, distribution radius and point count. In-game validation of 0.51 is pending.

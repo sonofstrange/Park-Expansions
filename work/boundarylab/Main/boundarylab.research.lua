@@ -2,7 +2,7 @@
 -- already tested boundary operation; no game files or saves are edited here.
 local g = _G
 local api = g.api
-local R = {Widths={1152,1344,1536,1792,2040}, Heights={400,700,1000,1500,2048}, Costs={12500,25000,50000,100000,200000}}
+local R = {Widths={1152,1344,1536,1792,2040}, Heights={400,700,1000,1500,2048}, Costs={12500,25000,50000,100000,200000}, WidthCosts4K={12500,25000,50000,100000,200000,400000,800000}}
 local nativeSea={ready=false,error="Sea raster component has not initialized."}
 function R.NativeSeaReady() return nativeSea.ready end
 function R.InitializeNative()
@@ -29,7 +29,13 @@ function R.MapFolder(world)
     return world.parkExpansionsTerrainSize==4096 and "Maps4096" or "Maps"
 end
 function R.WidthsFor(world)
-    return world.parkExpansionsTerrainSize==4096 and {1536,2040,2560,3072,4088} or R.Widths
+    return (world and world.parkExpansionsTerrainSize==4096) and {1152,1344,1536,1792,2040,3072,4088} or R.Widths
+end
+function R.CostsFor(branch,world)
+    if branch=="width" and world and world.parkExpansionsTerrainSize==4096 then
+        return R.WidthCosts4K
+    end
+    return R.Costs
 end
 local wrappers = g.setmetatable({}, {__mode="k"})
 local current
@@ -63,6 +69,22 @@ function R.LoadConfig(world)
             g.assert(g.type(values.ResearchEnabled)=="boolean","ResearchEnabled must be true or false")
             if values.ManualParkSize==nil then values.ManualParkSize=2040 end
             if values.ManualMaxHeight==nil then values.ManualMaxHeight=2048 end
+            local size=2048
+            if values.Enable4KMap~=nil then
+                g.assert(g.type(values.Enable4KMap)=="boolean" or values.Enable4KMap==2048 or values.Enable4KMap==4096,
+                    "Enable4KMap must be true, false, 2048, or 4096")
+                if values.Enable4KMap==true or values.Enable4KMap==4096 then size=4096 end
+            elseif values.MaxMapSize~=nil then
+                g.assert(values.MaxMapSize==2048 or values.MaxMapSize==4096 or g.type(values.MaxMapSize)=="boolean",
+                    "MaxMapSize must be 2048 or 4096")
+                if values.MaxMapSize==4096 or values.MaxMapSize==true then size=4096 end
+            elseif values.MapSize~=nil then
+                g.assert(values.MapSize==2048 or values.MapSize==4096 or g.type(values.MapSize)=="boolean",
+                    "MapSize must be 2048 or 4096")
+                if values.MapSize==4096 or values.MapSize==true then size=4096 end
+            end
+            values.Enable4KMap=(size==4096)
+            values.MaxMapSize=size
             local function finite(value)
                 return g.type(value)=="number" and value==value and value~=g.math.huge and value~=-g.math.huge
             end
@@ -74,13 +96,13 @@ function R.LoadConfig(world)
             end
         end)
     end
-    if not ok then values={ResearchEnabled=true,error="Config error: "..g.tostring(message)} end
+    if not ok then values={ResearchEnabled=true,Enable4KMap=false,MaxMapSize=2048,error="Config error: "..g.tostring(message)} end
     world.parkExpansionsConfig=values
     return values
 end
 
 local function settings(world)
-    return world and world.parkExpansionsConfig or {ResearchEnabled=true}
+    return world and world.parkExpansionsConfig or {ResearchEnabled=true,Enable4KMap=false,MaxMapSize=2048}
 end
 
 local function points()
@@ -268,7 +290,12 @@ function R.PrepareMap(world)
     if request and g.type(request.sFileName)=="string" then
         local name=request.sFileName:lower():match("^/run/parks/sandbox/([^/]+)%.bin$")
         biome=names[name]
-        if biome then world.parkExpansionsTerrainSize=4096 end
+        if biome then
+            if not world.parkExpansionsTerrainSize then
+                local cfg=settings(world)
+                world.parkExpansionsTerrainSize=(cfg.Enable4KMap or cfg.MaxMapSize==4096) and 4096 or 2048
+            end
+        end
     elseif token and token.cSaveToken and g.type(api.save.GetSaveMetadata)=="function" then
         if g.type(api.save.IsSaveToken)=="function" and not api.save.IsSaveToken(token.cSaveToken) then return true end
         local ok,metadata=g.pcall(api.save.GetSaveMetadata,token.cSaveToken)
@@ -472,6 +499,26 @@ function R.InstallCompatibilityHooks()
         end)
 end
 
+function R.InstallCaptureGridFix()
+    g.require("forgeutils.hookmanager"):AddHook("CommonObjectCreator","CreateEnvironmentCaptureGrid",
+        function(original,minimum,maximum,radius,height,token,...)
+            local world=current
+            if not world or world.parkExpansionsTerrainSize~=4096 then
+                return original(minimum,maximum,radius,height,token,...)
+            end
+            -- CPTWorld uses a fixed 60 m distribution radius at every extent.
+            -- A 4K grid then exhausts native capture-resource symbol IDs. Keep
+            -- the tested 2K point budget while covering the complete 4K bounds.
+            local span=g.math.max(maximum:X()-minimum:X(),maximum:Y()-minimum:Y())
+            local adjusted=radius*g.math.max(1,span/2048)
+            world.parkExpansionsCaptureSpan=span
+            world.parkExpansionsCaptureRadius=adjusted
+            local captures=original(minimum,maximum,adjusted,height,token,...)
+            world.parkExpansionsCaptureCount=g.type(captures)=="table" and g.math.max(0,#captures-1) or nil
+            return captures
+        end)
+end
+
 function R.BeforeLoad(world)
     current=world
     world.parkExpansionsParkReady=false
@@ -501,7 +548,7 @@ function R.BeforeLoad(world)
         function(load)
             -- Original templates and pre-research saves have no custom data.
             if not load or (load.width==nil and load.height==nil) then return true end
-            g.assert(g.type(load.width)=="number" and load.width%1==0 and load.width>=0 and load.width<=5,"Invalid saved width research")
+            g.assert(g.type(load.width)=="number" and load.width%1==0 and load.width>=0 and load.width<=7,"Invalid saved width research")
             g.assert(g.type(load.height)=="number" and load.height%1==0 and load.height>=0 and load.height<=5,"Invalid saved height research")
             world.boundaryLabResearch={managed=load.managed==true,width=load.width,height=load.height,
                 filename=load.filename,seed=load.seed,bounds=load.bounds,history=load.history}
@@ -627,9 +674,11 @@ function R.Request(branch,level)
     local s=state(world)
     level=g.tonumber(level)
     local restore=level==s[branch] and s[branch]>0
+    local maxLevel=(branch=="width" and world.parkExpansionsTerrainSize==4096) and 7 or 5
     if not s.managed or world.parkExpansionsSceneryPending or world.parkExpansionsSceneryTask or world.boundaryLabResearchBusy or world.boundaryLabTask
-        or (not restore and level~=s[branch]+1) or level<1 or level>5 or api.undo.IsBusy() then return end
-    local cost=(restore or free(world)) and 0 or R.Costs[level]
+        or (not restore and level~=s[branch]+1) or level<1 or level>maxLevel or api.undo.IsBusy() then return end
+    local costs=R.CostsFor(branch,world)
+    local cost=(restore or free(world)) and 0 or costs[level]
     if points()<cost then world.boundaryLabMessage="Not enough research points.";R.Push();return end
     -- Hold manual and automatic saves only for the duration of this purchase.
     -- A preview and its reserved research points must never be serialized.
@@ -669,10 +718,13 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.50 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.51 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_SIZE="..g.tostring(current.parkExpansionsTerrainSize or 2048)
         .."\nSEA_RASTER="..g.tostring(nativeSea.ready and 4096 or "unavailable")
         .."\nSEA_RASTER_ERROR="..g.tostring(nativeSea.error)
+        .."\nENV_CAPTURE_SPAN="..g.tostring(current.parkExpansionsCaptureSpan)
+        .."\nENV_CAPTURE_RADIUS="..g.tostring(current.parkExpansionsCaptureRadius)
+        .."\nENV_CAPTURE_POINTS="..g.tostring(current.parkExpansionsCaptureCount)
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
@@ -684,6 +736,8 @@ function R.Report()
         .."\nHEIGHT_VOLUME="..g.tostring(current.parkExpansionsHeightEntity)
         .."\nHEIGHT_SETUP_ERROR="..g.tostring(current.parkExpansionsHeightError)
         .."\nMANAGED="..g.tostring(s.managed).."\nHEIGHT_TOP="..g.tostring(current.parkExpansionsHeightTop)
+        .."\nENABLE_4K_MAP="..g.tostring(settings(current).Enable4KMap)
+        .."\nMAX_MAP_SIZE="..g.tostring(settings(current).MaxMapSize)
         .."\nRESEARCH_ENABLED="..g.tostring(settings(current).ResearchEnabled)
         .."\nMANUAL_SIZE="..g.tostring(settings(current).ManualParkSize)
         .."\nMANUAL_HEIGHT="..g.tostring(settings(current).ManualMaxHeight)

@@ -28,7 +28,7 @@ for _,kind in ipairs({"ready","unsupported","old-dll","missing","invalid"}) do
         -- A broken startup must not fall through into 4K generation/native loading.
         package.loadlib=function()error("Must not launch a worker after failed native initialization")end
         R.LoadingProgress=function()end
-        local world={parkLoadSaveManager={tLoadParkFromFileRequest={sFileName="/run/Parks/Sandbox/TaigaSandbox.bin"}}}
+        local world={parkLoadSaveManager={tLoadParkFromFileRequest={sFileName="/run/Parks/Sandbox/TaigaSandbox.bin"}},parkExpansionsConfig={Enable4KMap=true}}
         assert(R.PrepareMap(world)==false and world.parkExpansionsMapFailed)
         assert(type(world.parkExpansionsAutoError)=="string")
     end

@@ -52,7 +52,7 @@ local function create(isFree)
 end
 local function run(world,fail)
  R.Advance(world,function(self,width)
-  assert(self==world and width>1024 and width<=2048)
+  assert(self==world and width>1024 and width<=4096)
   if fail then R.Finish(self,false,'rejected');return end
   self.boundaryLabCommitResult={seed={width/2,42,0},bounds={-width/2,width/2,-width/2,width/2}}
  end)
@@ -91,6 +91,28 @@ assert(other.boundaryLabResearch.width==5 and other.boundaryLabResearch.height==
 assert(other.boundaryLabActiveSeed[1]==1020 and other.boundaryLabTerrainCreated)
 R.Report();assert(clipboard:find('WIDTH_LEVEL=5 HEIGHT_LEVEL=5',1,true))
 print('PASS save reload restores tiers and exact contour seed')
+local world4k=create(false)
+world4k.parkExpansionsTerrainSize=4096
+balance=2000000
+for level=1,5 do R.Request('width',level);run(world4k) end
+assert(world4k.boundaryLabResearch.width==5 and world4k.boundaryLabExpectedBounds[2]==1020)
+local balBefore6=balance
+R.Request('width',6);run(world4k)
+assert(world4k.boundaryLabResearch.width==6 and world4k.boundaryLabExpectedBounds[2]==1536)
+assert(balBefore6-balance==400000)
+local balBefore7=balance
+R.Request('width',7);run(world4k)
+assert(world4k.boundaryLabResearch.width==7 and world4k.boundaryLabExpectedBounds[2]==2044)
+assert(balBefore7-balance==800000)
+R.Request('width',8)
+assert(not world4k.boundaryLabQueued)
+local saved4k={};saveCallback(saved4k)
+R.Shutdown(world4k)
+local other4k={sandboxSettingsManager=world4k.sandboxSettingsManager,parkExpansionsTerrainSize=4096}
+R.BeforeLoad(other4k);loadCallback(saved4k);R.AfterLoad(other4k,templates)
+assert(other4k.boundaryLabResearch.width==7 and other4k.boundaryLabActiveSeed[1]==2044)
+R.Shutdown(other4k)
+print('PASS 4K width research expands to 7 steps with 400k/800k pricing and roundtrip saves')
 world=create(false);balance=10
 R.Request('width',1);assert(not world.boundaryLabQueued and suspended==0 and balance==10)
 print('PASS insufficient points leaves the world untouched')
@@ -179,13 +201,24 @@ assert(large.parkExpansionsConfig.warning and large.boundaryLabQueued)
 R.Shutdown(large)
 print('PASS above-2048 requests accepted without configuration clamping')
 for _,text in ipairs({'ResearchEnabled="no"','ResearchEnabled=false;ManualParkSize=0',
- 'ResearchEnabled=false;ManualMaxHeight=0/0','ResearchEnabled=false;ManualParkSize=1/0','ResearchEnabled='})do
+ 'ResearchEnabled=false;ManualMaxHeight=0/0','ResearchEnabled=false;ManualParkSize=1/0','ResearchEnabled=',
+ 'Enable4KMap="no"','MaxMapSize=8192'})do
  local invalid=loadConfigured(text)
- assert(invalid.parkExpansionsConfig.error and invalid.parkExpansionsConfig.ResearchEnabled==true)
+ assert(invalid.parkExpansionsConfig.error and invalid.parkExpansionsConfig.ResearchEnabled==true and invalid.parkExpansionsConfig.Enable4KMap==false)
  assert(not invalid.boundaryLabQueued and balance==12345)
  R.Shutdown(invalid)
 end
 print('PASS malformed config, invalid types and nonfinite numbers fail without applying manual limits')
+local defaultCfg=loadConfigured('ResearchEnabled=true')
+assert(defaultCfg.parkExpansionsConfig.Enable4KMap==false and defaultCfg.parkExpansionsConfig.MaxMapSize==2048)
+R.Shutdown(defaultCfg)
+local enable4k=loadConfigured('Enable4KMap=true')
+assert(enable4k.parkExpansionsConfig.Enable4KMap==true and enable4k.parkExpansionsConfig.MaxMapSize==4096)
+R.Shutdown(enable4k)
+local maxMap4k=loadConfigured('MaxMapSize=4096')
+assert(maxMap4k.parkExpansionsConfig.Enable4KMap==true and maxMap4k.parkExpansionsConfig.MaxMapSize==4096)
+R.Shutdown(maxMap4k)
+print('PASS map size configuration defaults to 2048 and accepts 4096 via Enable4KMap or MaxMapSize')
 loadfile=originalLoadfile
 
 -- Existing unmodified saves must explain the block without spending points.
