@@ -1,7 +1,7 @@
 {
   "version": "0.51-test",
   "archive": "Park-Expansions-0.51-test.zip",
-  "archive_sha256": "a1d6968efd824dea1a0e34ae3f62c49d17003136443fa50de22f9f634cc926e2",
+  "archive_sha256": "fac8a4524406faa09a9c21797e0cf1e2c8e749fb19f84c1aaf28abccd6e2a71a",
   "bytes": 23363391,
   "file_sha256": {
     "Mod_BoundaryLab/Compatibility/AutoWorker/ParkExpansionsWorker.exe": "c647f0fed53b9e6fa363826a045055ac806543b213bc5cee0b363a85a91a017e",
