@@ -1,29 +1,12 @@
 {
   "version": "0.52",
   "archive": "Park-Expansions-0.52.zip",
-  "archive_sha256": "e031299c68e0f4078f492fa5c20a371cf92633a7aa2e257d9b6b8f9cc3431b6c",
-  "bytes": 2713946,
+  "archive_sha256": "a373a08931f17352273b4a6f02863e6351c529c74ca85ade115c0d439bad2aca",
+  "bytes": 240236,
   "file_sha256": {
-    "Mod_BoundaryLab/Compatibility/AutoWorker/ParkExpansionsWorker.exe": "9772b5d12038025c52170d57c7babdd4a9dd7db5b101f670963f0f9a72f7f41d",
-    "Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll": "c27e5130de4e4e9d55483e51107dba1bdc3ddd802d296d65cbf6a243fa0f09ab",
+    "Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll": "10b2f98f999f09c8c768a45f01e13160360e1385c351abe8d3c9ed1a5dc5ae08",
     "Mod_BoundaryLab/Config.ini": "a186e16eb5ef5d72be820ef5cae13ee0f3d7a476b31bfce9ffe99a99ed7dce69",
     "Mod_BoundaryLab/Main.ovl": "c5a72975979a2d885601fa56c130ad7b0e7208f1941b15297fdc6ddc405542bc",
-    "Mod_BoundaryLab/Manifest.xml": "43841d0e4785ef45e81079e19687b6c45f2146467aed9c15bd08edaa14fcb24a",
-    "Mod_BoundaryLab/Maps/MediterraneanSandbox.decor.json": "86407144ef4d834928b7252793b6754d99dae247fa8db60e9f6a16e5a6a67398",
-    "Mod_BoundaryLab/Maps/MediterraneanSandbox.decor.lua": "66228562ad7057a9e38ebce02f5c1b7bed7a1a7891c16e5fafcc5b9e4953f2f2",
-    "Mod_BoundaryLab/Maps/TaigaSandbox.decor.json": "94b4ea9061014dddc8ecdc0eee5be79ed04d2715a25965f3474c3d9a7b226a33",
-    "Mod_BoundaryLab/Maps/TaigaSandbox.decor.lua": "fb608353db642309789eaf502903fd62146647e96be28b1be32707c44ff244df",
-    "Mod_BoundaryLab/Maps/TemperateSandbox.decor.json": "fb5ba47e528bae57acdafadbd1b39b15beb9c6e22a809e520f199c8d673caf94",
-    "Mod_BoundaryLab/Maps/TemperateSandbox.decor.lua": "67bf3ff78b9038dd3d6d6a701103bbd682cc0d58f10f9a7a82f0d88dcfc95e2a",
-    "Mod_BoundaryLab/Maps/TropicalSandbox.decor.json": "3593e79da14b92b512750a5221fe10ec55bb12a29ff88d9167e1a0be8171e93c",
-    "Mod_BoundaryLab/Maps/TropicalSandbox.decor.lua": "202a383b91123a0b1607617208a3ec5aef939cf761280589eaf1d13261f317e3",
-    "Mod_BoundaryLab/Maps4096/MediterraneanSandbox.decor.json": "b8cb4e000001fc522c57879a11692999365f179f624cdfdc60c71621c1854af9",
-    "Mod_BoundaryLab/Maps4096/MediterraneanSandbox.decor.lua": "10392aa6695869a56afc95b8cb67628a1937e5a20eee3fd85523457cd68dee73",
-    "Mod_BoundaryLab/Maps4096/TaigaSandbox.decor.json": "2084cb59ebe8d5149813d8cd28d3f3349bdd02e48a51dd085b796ccffd9a9498",
-    "Mod_BoundaryLab/Maps4096/TaigaSandbox.decor.lua": "880b27b08ffae52695c3544eae808b8914ec8ef7e0502b6a20d40721e5c3ce5a",
-    "Mod_BoundaryLab/Maps4096/TemperateSandbox.decor.json": "da4a3a87d6b0710b8b63d9d343ae4573a2984e53acad91ae677bfbf05c5666ec",
-    "Mod_BoundaryLab/Maps4096/TemperateSandbox.decor.lua": "8681b01daa0364b02778694f07c91dd2ad6b9f4aa3cf046e5b34669b37ce9c57",
-    "Mod_BoundaryLab/Maps4096/TropicalSandbox.decor.json": "e7e6843a0e99117bb8814fb8f086a4066cfabfee6850e53cfdb48541f010d69e",
-    "Mod_BoundaryLab/Maps4096/TropicalSandbox.decor.lua": "b2828b91737ef8daca3a0f2516162f36aff26575cef88ade486c7ca46934c430"
+    "Mod_BoundaryLab/Manifest.xml": "43841d0e4785ef45e81079e19687b6c45f2146467aed9c15bd08edaa14fcb24a"
   }
 }
