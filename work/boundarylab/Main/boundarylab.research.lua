@@ -85,9 +85,15 @@ function R.LoadConfig(world)
             end
             values.Enable4KMap=(size==4096)
             values.MaxMapSize=size
+            if values.CameraZoomMultiplier==nil then values.CameraZoomMultiplier=2.0 end
+            if values.CameraZoomMax~=nil then
+                values.CameraZoomMultiplier=values.CameraZoomMax/300
+            end
             local function finite(value)
                 return g.type(value)=="number" and value==value and value~=g.math.huge and value~=-g.math.huge
             end
+            g.assert(finite(values.CameraZoomMultiplier) and values.CameraZoomMultiplier>0,
+                "CameraZoomMultiplier must be a finite positive number")
             g.assert(finite(values.ManualParkSize) and values.ManualParkSize>0,
                 "ManualParkSize must be a finite positive number")
             g.assert(finite(values.ManualMaxHeight),"ManualMaxHeight must be a finite world Y coordinate")
@@ -96,7 +102,7 @@ function R.LoadConfig(world)
             end
         end)
     end
-    if not ok then values={ResearchEnabled=true,Enable4KMap=false,MaxMapSize=2048,error="Config error: "..g.tostring(message)} end
+    if not ok then values={ResearchEnabled=true,Enable4KMap=false,MaxMapSize=2048,CameraZoomMultiplier=2.0,error="Config error: "..g.tostring(message)} end
     world.parkExpansionsConfig=values
     return values
 end
@@ -519,6 +525,37 @@ function R.InstallCaptureGridFix()
         end)
 end
 
+function R.InstallCameraZoomFix()
+    local hookManager=g.require("forgeutils.hookmanager")
+    if not hookManager then return end
+    local function applyZoom(cfg)
+        if not cfg or not cfg.nZoomMaximum then return end
+        local mult=2.0
+        if current and current.parkExpansionsConfig and current.parkExpansionsConfig.CameraZoomMultiplier then
+            mult=current.parkExpansionsConfig.CameraZoomMultiplier
+        elseif current and current.parkExpansionsTerrainSize==4096 then
+            mult=2.5
+        end
+        if mult>1.0 then
+            cfg.nZoomMaximum=300*mult
+        end
+    end
+    hookManager:AddHook("Components.Cameras.CameraModeManager","GetConfig",
+        function(original,self,...)
+            local cfg=original(self,...)
+            applyZoom(cfg)
+            return cfg
+        end)
+    hookManager:AddHook("Components.Cameras.CameraModeManager","UpdateConfig",
+        function(original,self,...)
+            local res=original(self,...)
+            if self and self.tConfig then
+                applyZoom(self.tConfig)
+            end
+            return res
+        end)
+end
+
 function R.BeforeLoad(world)
     current=world
     world.parkExpansionsParkReady=false
@@ -763,6 +800,8 @@ function R.Report()
         .."\nLOADING_UI_LAST_PERCENT="..g.tostring(loadingDiagnostics.lastPercent)
         .."\nLOADING_UI_ERROR="..g.tostring(loadingDiagnostics.error)
         .."\n"..(current.boundaryLabReport or current.boundaryLabMessage or "")
+    local camZoomMax = (settings(current).CameraZoomMultiplier or 2.0) * 300
+    report = report .. "\nCAMERA_ZOOM_MAX=" .. g.tostring(camZoomMax)
     api.world.GetWorldAPIs().editors:CopyToClipboard(report)
     current.boundaryLabMessage="Report copied. Paste it into chat with Ctrl+V."
     R.Push()

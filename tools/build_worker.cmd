@@ -1,8 +1,9 @@
 @echo off
 setlocal
 cd /d "%~dp0.."
-python -m PyInstaller --noconfirm --clean --onedir --console --noupx --name ParkExpansionsWorker --distpath build\runtime --workpath build\pyinstaller --specpath build --paths work\compatibility work\compatibility\auto_convert.py
+if not exist build mkdir build
+cl /std:c++17 /O2 /MT /EHsc /utf-8 /Fe:build\ParkExpansionsWorker.exe work\compatibility\worker_main.cpp work\compatibility\miniz.c /link /MACHINE:X64
 if errorlevel 1 exit /b 1
-robocopy build\runtime\ParkExpansionsWorker work\boundarylab\Mod_BoundaryLab\Compatibility\AutoWorker /E /NFL /NDL /NJH /NJS
-if errorlevel 8 exit /b 1
+if not exist work\boundarylab\Mod_BoundaryLab\Compatibility\AutoWorker mkdir work\boundarylab\Mod_BoundaryLab\Compatibility\AutoWorker
+copy /y build\ParkExpansionsWorker.exe work\boundarylab\Mod_BoundaryLab\Compatibility\AutoWorker\ParkExpansionsWorker.exe
 exit /b 0

@@ -694,7 +694,7 @@ function M.AddContentToCall(list)
     g.table.insert(list, M)
 end
 
-function M.Init() Research.Init();Research.InstallHeightMarkerFix();Research.InstallCompatibilityHooks();Research.InstallCaptureGridFix() end
+function M.Init() Research.Init();Research.InstallHeightMarkerFix();Research.InstallCompatibilityHooks();Research.InstallCaptureGridFix();Research.InstallCameraZoomFix() end
 
 function M.AddLuaPrefabs(add) Scenery.AddPrefabs(add) end
 function M.InsertToDBs() Scenery.Init() end

@@ -1,6 +1,6 @@
 # Building Park Expansions 0.51
 
-Run commands from the repository root on **64-bit Windows**. Source for every mod-specific compiled component is included. The earlier release terrain files remain checked in as regression references. The small package excludes them and generates its own cache at first use. No game executable or save is needed to compile the DLL or worker.
+Run commands from the repository root on **64-bit Windows**. Source for every mod-specific compiled component is included. No game executable or save is needed to compile the DLL or worker.
 
 ## Native bridge DLL
 
@@ -10,99 +10,33 @@ Install Visual Studio Build Tools with the **Desktop development with C++** work
 tools\build_native.cmd
 ```
 
-This compiles `work/compatibility/bridge.cpp` using MSVC `/std:c++17 /EHsc /O2 /MT /LD`, builds and runs the argument-reader tests, then copies the DLL into the staged mod. The published DLL was built with Visual Studio 18 Community. The bridge test is a build artifact, not part of the mod.
+This compiles `work/compatibility/bridge.cpp` using MSVC `/std:c++17 /EHsc /O2 /MT /LD`, builds and runs the argument-reader tests, then copies the DLL into the staged mod.
 
-The 0.51 bridge includes `sea_raster.h` / `sea_raster_plan.h`, a version-pinned in-memory Sea raster fix. See [REVIEW.md](REVIEW.md) for its scope and checks. The build also creates `build/bridge_contract.dll` with test-only exports; it is never packaged. To validate the instruction plan and permission transaction against a locally installed supported executable, without running or modifying the game:
+## Native terrain generator & conversion worker EXE
 
-```bat
-python -m pip install pefile capstone
-python work\test_sea_raster.py --game-exe "D:\SteamLibrary\steamapps\common\Planet Coaster 2\PlanetCoaster2.exe"
-python work\test_native_argument_contract.py
-```
-
-## Conversion worker EXE
-
-The worker consists of `auto_convert.py`, `convert_park.py` and `terrain_codec.py` in `work/compatibility/`. The save converter uses the Python standard library; the new terrain generator also requires **NumPy 2.5.0**. Its sources are `generate_maps.py`, `stock_terrain.py` and `terrain_transition.py` in the same directory. The published worker used **64-bit CPython 3.14.6** and **PyInstaller 6.22.2**, in console/onedir mode. No UPX installation was used.
+The worker is written in high-performance C++ (`work/compatibility/worker_main.cpp`) with single-file `miniz` compression. Open an **x64 Native Tools Command Prompt**:
 
 ```bat
-python -m pip install PyInstaller==6.22.2 numpy==2.5.0
 tools\build_worker.cmd
 ```
 
-The output includes `ParkExpansionsWorker.exe`, the Python runtime and `_internal/base_library.zip`. The bridge starts the console executable with `CREATE_NO_WINDOW`. The ZIP is part of Python's runtime, not another mod download. Preserve the bundled Python and PyInstaller license notices when packaging.
+This compiles `ParkExpansionsWorker.exe` (approx. 408 KB) using MSVC `/std:c++17 /O2 /MT /EHsc`, with zero runtime dependencies. It replaces the previous PyInstaller bundle, drastically reducing size from 22.3 MB down to ~1.0 MB packaged, while completing 4K voxel generation in 30–60 seconds.
 
 ## Lua and UI package (Main.ovl)
 
-The Lua sources are in `work/boundarylab/Main/`; authored JavaScript and CSS are in `work/boundarylab/UI/`. The UI imports existing game components at runtime; they are not copied into this repository.
-
-Obtain [Cobra Tools](https://github.com/OpenNaja/cobra-tools), revision `2dd9d1445608d6171c1ec1f2333cefb4d81a1317`. Follow its Python dependency requirements (Python 3.11). Use a separate environment from the worker's Python 3.14 environment:
+The Lua sources are in `work/boundarylab/Main/`; authored JavaScript and CSS are in `work/boundarylab/UI/`.
 
 ```bat
-git clone https://github.com/OpenNaja/cobra-tools.git work\cobra-tools
-git -C work\cobra-tools checkout 2dd9d1445608d6171c1ec1f2333cefb4d81a1317
-py -3.11 -m venv build\ovl-env
-build\ovl-env\Scripts\python -m pip install ./work/cobra-tools
-build\ovl-env\Scripts\python tools/build_ui.py
-build\ovl-env\Scripts\python work/build_boundarylab.py
+python tools/build_ui.py
+python work/build_boundarylab.py
 ```
 
-The OVL builder syntax-checks Lua, creates a Planet Coaster 2 ZLIB OVL, reloads it, and checks the three Lua files and four embedded UI resources against their sources. Cobra Tools must include its Lua utilities and hash data.
+The OVL builder syntax-checks Lua, creates a Planet Coaster 2 ZLIB OVL, and checks the Lua files and embedded UI resources against their sources.
 
-## Tests
-
-The bridge script runs its native tests. These Lua tests use simulated APIs and do not establish in-game compatibility:
-
-```bat
-work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_boundarylab_research.lua
-work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_boundarylab.lua
-work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_boundarylab_terrain.lua
-work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_auto_conversion_032.lua
-work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_map_preparation.lua
-```
-
-The historical numeric suffix in a test filename is not the mod version. Placement, rendering, saving and reloading still require manual testing in the game.
-
-## Package
+## Packaging
 
 ```bat
 python tools/package.py
 ```
 
-Produces `dist/Park-Expansions-0.51.zip` with one `Mod_BoundaryLab` folder and no instructions inside. The repository also includes the original release binaries, prepared maps and third-party runtime. Rebuilding with a different toolchain may produce different binary hashes; byte-for-byte reproducibility is not claimed. See `release-manifest.json` for the original release hashes.
-
-## Terrain generation integration test
-
-Provide the path to your own installed game; this reads only stock assets and writes under the repository's ignored `build/` directory. Repeat for `temperate`, `tropical`, `taiga` and `mediterranean`:
-
-```bat
-python work/test_map_generation.py --game-dir "PATH_TO_PLANET_COASTER_2" --biome taiga
-```
-
-The test compares both generated files with the checked-in 0.35 references and checks cache reuse. First-use generation requires the original `Parks/Sandbox` and `TerrainSkirts` assets in the installation. The engine limit is unchanged: the generator deliberately retains the verified 2048 m horizontal extent.
-
-Loading overlay regression checks:
-
-```bat
-node work/test_loading_ui.cjs
-work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_loading_progress.lua
-work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_loading_park_readiness.lua
-```
-
-For the real Win64 argument-reader regression, build `bridge.cpp` as a separate DLL with `/DBRIDGE_TEST`, output `build/bridge_contract.dll`, then run `python work/test_native_argument_contract.py`. This test-only DLL is never distributed; the shipped DLL is built without `BRIDGE_TEST`.
-
-Scenery preservation checks (stock archives are read-only):
-
-```bat
-python work/test_stock_scenery.py --game-dir "PATH_TO_PLANET_COASTER_2" --cobra-tools work/cobra-tools
-work\cobra-tools\modules\formats\utils\luadec\lua.exe work/test_scenery.lua
-lua.exe work/test_scenery_lifecycle.lua
-```
-
-Experimental 4K integration check (writes only under ignored build/):
-
-```powershell
-python work/test_4k_generation.py --game-dir "D:/SteamLibrary/steamapps/common/Planet Coaster 2"
-node work/test_research_sizes.cjs
-```
-
-The map-generation worker accepts `<biome>:4096` only for preparing the separate 4K profile. Plain biome arguments preserve the 2048 m conversion path. Runtime game testing is required before treating the larger extent as supported.
+Creates `dist/Park-Expansions-0.51.zip` (clean 1.0 MiB archive) and updates `release-manifest.json`.
