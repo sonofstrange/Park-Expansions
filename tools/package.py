@@ -3,7 +3,7 @@ import hashlib,json,zipfile,shutil
 root=Path(__file__).resolve().parents[1]
 source=root/'work/boundarylab/Mod_BoundaryLab'
 dist=root/'dist';dist.mkdir(exist_ok=True)
-output=dist/'Park-Expansions-0.51.zip'
+output=dist/'Park-Expansions-0.52.zip'
 release_dir=dist/'release/Mod_BoundaryLab'
 
 # Clean previous release directory if exists
@@ -51,7 +51,7 @@ with zipfile.ZipFile(output) as z:
     assert z.testzip() is None
     assert not any(n.endswith('.bin') or n.endswith('.trn') or '/AutoConversion/' in n or n.endswith('.park2') for n in z.namelist())
 
-manifest={'version':'0.51','archive':output.name,'archive_sha256':hashlib.sha256(output.read_bytes()).hexdigest(),
+manifest={'version':'0.52','archive':output.name,'archive_sha256':hashlib.sha256(output.read_bytes()).hexdigest(),
  'bytes':output.stat().st_size,'file_sha256':{'Mod_BoundaryLab/'+n:hashlib.sha256(d).hexdigest() for n,d in sorted(files.items())}}
 (root/'release-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
 

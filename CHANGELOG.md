@@ -2,7 +2,7 @@
 
 All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in this file.
 
-## [0.51] - 2026-10-27
+## [0.52] - 2026-10-27
 
 ### Added
 - **4096 × 4096 Map Support:**

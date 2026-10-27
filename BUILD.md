@@ -1,4 +1,4 @@
-# Building Park Expansions 0.51
+# Building Park Expansions 0.52
 
 Run commands from the repository root on **64-bit Windows**. Source for every mod-specific compiled component is included. No game executable or save is needed to compile the DLL or worker.
 
@@ -39,4 +39,4 @@ The OVL builder syntax-checks Lua, creates a Planet Coaster 2 ZLIB OVL, and chec
 python tools/package.py
 ```
 
-Creates `dist/Park-Expansions-0.51.zip` (clean 1.0 MiB archive) and updates `release-manifest.json`.
+Creates `dist/Park-Expansions-0.52.zip` and updates `release-manifest.json`.
