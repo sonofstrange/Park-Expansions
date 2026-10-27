@@ -12,6 +12,29 @@ local clusters={
     {"NAT_Bush_Creosote_Flowerless_Cluster_01","NAT_Bush_Creosote_Flowerless_Large_01"},
 }
 
+local clusterModels={
+    NAT_Tree_Conifer_Larch_European_Cluster_01="nat_tree_conifer_larch_european_cluster_01_skirt",
+    NAT_Tree_Conifer_Larch_European_Cluster_02="nat_tree_conifer_larch_european_cluster_02_skirt",
+    NAT_Tree_Conifer_Pine_Aleppo_Cluster_01="nat_tree_conifer_pine_aleppo_cluster_01_skirt",
+    NAT_Tree_Conifer_Pine_Aleppo_Cluster_02="nat_tree_conifer_pine_aleppo_cluster_02_skirt",
+    NAT_Tree_Broadleaf_Olive_Cluster_01="nat_tree_broadleaf_olive_cluster_01_skirt",
+    NAT_Tree_Broadleaf_Olive_Cluster_02="nat_tree_broadleaf_olive_cluster_02_skirt",
+    NAT_Bush_Creosote_Flowerless_Cluster_01="nat_bush_creosote_flowerless_cluster_01_skirt",
+}
+
+local function ensureCompiled(name)
+    if not api or not api.entity or g.type(api.entity.FindPrefab)~="function" then return false end
+    if api.entity.FindPrefab(name) then return true end
+    local ok,module=g.pcall(g.require,name)
+    if not ok or not module then
+        ok,module=g.pcall(g.require,name:lower())
+    end
+    if ok and module and g.type(module.GetRoot)=="function" and g.type(api.entity.CompilePrefab)=="function" then
+        g.pcall(api.entity.CompilePrefab,module.GetRoot(),name)
+    end
+    return (api.entity.FindPrefab(name) and true) or false
+end
+
 local function registerPrefab(add,name,root)
     -- Native prefab resolution also uses Lua modules, including on a later
     -- rebuild. Match ForgeUtils.PrefabUtility's root/flattened-root contract.
@@ -29,26 +52,36 @@ local function registerPrefab(add,name,root)
         g.package.preload[name:lower()]=loader
     end
     if add then add(name,root) end
+    if api and api.entity and g.type(api.entity.CompilePrefab)=="function" then
+        g.pcall(api.entity.CompilePrefab,root,name)
+    end
 end
 
 function S.AddPrefabs(add)
     for _,entry in g.ipairs(clusters) do
+        ensureCompiled(entry[2].."_Game")
+        ensureCompiled(entry[2])
         local ok,sourceModule=g.pcall(g.require,entry[1].."_Skirt")
         if not ok or not sourceModule or g.type(sourceModule.GetRoot)~="function" then
             ok,sourceModule=g.pcall(g.require,(entry[1].."_Skirt"):lower())
         end
-        if ok and sourceModule and g.type(sourceModule.GetRoot)=="function" then
-            local source=sourceModule.GetRoot()
-            local model=source and source.Properties and source.Properties.ModelName and source.Properties.ModelName.Default
-            -- Retain the cluster's actual mesh and asset package, with the ordinary
-            -- game's interaction/render components so it can be selected and moved.
-            local root={Prefab=entry[2].."_Game",Components={
-                Model={ModelName=model},AssetPackageLoader=source and source.Components and source.Components.AssetPackageLoader}}
-            registerPrefab(add,"PE_"..entry[1],root)
-            -- Both entry points inherit the stock gameplay prefab directly. Avoid
-            -- a second custom inheritance hop during native preview construction.
-            registerPrefab(add,"PE_"..entry[1].."_Game",root)
+        local source=ok and sourceModule and g.type(sourceModule.GetRoot)=="function" and sourceModule.GetRoot()
+        local model=source and source.Properties and source.Properties.ModelName and source.Properties.ModelName.Default
+            or clusterModels[entry[1]]
+        local pkg=source and source.Components and source.Components.AssetPackageLoader
+        if not pkg then
+            local pok,pMod=g.pcall(g.require,entry[2].."_Game")
+            local pRoot=pok and pMod and g.type(pMod.GetRoot)=="function" and pMod.GetRoot()
+            pkg=pRoot and pRoot.Components and pRoot.Components.AssetPackageLoader
         end
+        -- Retain the cluster's actual mesh and asset package, with the ordinary
+        -- game's interaction/render components so it can be selected and moved.
+        local root={Prefab=entry[2].."_Game",Components={
+            Model={ModelName=model},AssetPackageLoader=pkg}}
+        registerPrefab(add,"PE_"..entry[1],root)
+        -- Both entry points inherit the stock gameplay prefab directly. Avoid
+        -- a second custom inheritance hop during native preview construction.
+        registerPrefab(add,"PE_"..entry[1].."_Game",root)
     end
 end
 
@@ -179,23 +212,22 @@ function S.AfterLoad(world,progress)
         local placements={}
         for _,group in g.ipairs(data.groups) do
             local gameplay=group.resource.."_Game"
-            if not api.entity.FindPrefab(gameplay) then
-                local ok,module=g.pcall(g.require,gameplay)
-                if not ok or not module then
-                    ok,module=g.pcall(g.require,gameplay:lower())
+            local available=ensureCompiled(gameplay)
+            if not available then
+                for _,cl in g.ipairs(clusters) do
+                    if group.resource=="PE_"..cl[1] then
+                        available=ensureCompiled(cl[2].."_Game")
+                        break
+                    end
                 end
-                if ok and module and g.type(module.GetRoot)=="function" then
-                    api.entity.CompilePrefab(module.GetRoot(),gameplay)
-                end
-                g.assert(api.entity.FindPrefab(gameplay),"Scenery gameplay prefab is unavailable: "..gameplay)
             end
-            if not api.entity.FindPrefab(group.resource) then
-                local ok,module=g.pcall(g.require,group.resource)
-                if not ok or not module then
-                    ok,module=g.pcall(g.require,group.resource:lower())
-                end
-                if ok and module and g.type(module.GetRoot)=="function" then
-                    api.entity.CompilePrefab(module.GetRoot(),group.resource)
+            g.assert(available,"Scenery gameplay prefab is unavailable: "..gameplay)
+            if not ensureCompiled(group.resource) then
+                for _,cl in g.ipairs(clusters) do
+                    if group.resource=="PE_"..cl[1] then
+                        ensureCompiled(cl[2])
+                        break
+                    end
                 end
             end
             for _,row in g.ipairs(group.instances) do
@@ -223,7 +255,16 @@ function S.AfterLoad(world,progress)
             local created={}
             for index=cursor,last do
                 local entry=placements[index]
-                created[#created+1]={object=hierarchy:CreateNewPart(entry.resource,token),row=entry.row}
+                local resName=entry.resource
+                if not api.entity.FindPrefab(resName) then
+                    for _,cl in g.ipairs(clusters) do
+                        if resName=="PE_"..cl[1] and api.entity.FindPrefab(cl[2]) then
+                            resName=cl[2]
+                            break
+                        end
+                    end
+                end
+                created[#created+1]={object=hierarchy:CreateNewPart(resName,token),row=entry.row}
             end
             wait(function()return api.entity.HaveRequestsCompleted(token)end,"Scenery assets did not finish loading")
             for _,entry in g.ipairs(created) do
