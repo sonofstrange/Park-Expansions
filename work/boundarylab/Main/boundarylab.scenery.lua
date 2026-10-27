@@ -21,22 +21,34 @@ local function registerPrefab(add,name,root)
         if not prefab and api.entity.CompilePrefab(root,name) then prefab=api.entity.FindPrefab(name) end
         return prefab
     end
+    local loader=function() return module end
+    g.package.loaded[name]=module
     g.package.loaded[name:lower()]=module
-    add(name,root)
+    if g.package.preload then
+        g.package.preload[name]=loader
+        g.package.preload[name:lower()]=loader
+    end
+    if add then add(name,root) end
 end
 
 function S.AddPrefabs(add)
     for _,entry in g.ipairs(clusters) do
-        local source=g.require(entry[1].."_Skirt").GetRoot()
-        local model=source.Properties.ModelName.Default
-        -- Retain the cluster's actual mesh and asset package, with the ordinary
-        -- game's interaction/render components so it can be selected and moved.
-        local root={Prefab=entry[2].."_Game",Components={
-            Model={ModelName=model},AssetPackageLoader=source.Components.AssetPackageLoader}}
-        registerPrefab(add,"PE_"..entry[1],root)
-        -- Both entry points inherit the stock gameplay prefab directly. Avoid
-        -- a second custom inheritance hop during native preview construction.
-        registerPrefab(add,"PE_"..entry[1].."_Game",root)
+        local ok,sourceModule=g.pcall(g.require,entry[1].."_Skirt")
+        if not ok or not sourceModule or g.type(sourceModule.GetRoot)~="function" then
+            ok,sourceModule=g.pcall(g.require,(entry[1].."_Skirt"):lower())
+        end
+        if ok and sourceModule and g.type(sourceModule.GetRoot)=="function" then
+            local source=sourceModule.GetRoot()
+            local model=source and source.Properties and source.Properties.ModelName and source.Properties.ModelName.Default
+            -- Retain the cluster's actual mesh and asset package, with the ordinary
+            -- game's interaction/render components so it can be selected and moved.
+            local root={Prefab=entry[2].."_Game",Components={
+                Model={ModelName=model},AssetPackageLoader=source and source.Components and source.Components.AssetPackageLoader}}
+            registerPrefab(add,"PE_"..entry[1],root)
+            -- Both entry points inherit the stock gameplay prefab directly. Avoid
+            -- a second custom inheritance hop during native preview construction.
+            registerPrefab(add,"PE_"..entry[1].."_Game",root)
+        end
     end
 end
 
@@ -53,6 +65,7 @@ function S.Init()
 end
 
 function S.BeforeLoad(world)
+    S.AddPrefabs()
     world.parkExpansionsScenery={complete=false,count=0}
     local serial=api.world.GetWorldAPIs().worldserialisation
     serial:RegisterWorldSerialisationClient("ParkExpansionsScenery",1,
@@ -136,6 +149,7 @@ local function rejectionDetails(reasons)
 end
 
 function S.AfterLoad(world,progress)
+    S.AddPrefabs()
     local state=world.parkExpansionsScenery
     if not state or state.complete then return end
     local research=world.boundaryLabResearch or {}
@@ -166,9 +180,23 @@ function S.AfterLoad(world,progress)
         for _,group in g.ipairs(data.groups) do
             local gameplay=group.resource.."_Game"
             if not api.entity.FindPrefab(gameplay) then
-                local module=g.require(gameplay)
-                g.assert(g.type(module.GetRoot)=="function" and api.entity.CompilePrefab(module.GetRoot(),gameplay)
-                    and api.entity.FindPrefab(gameplay),"Scenery gameplay prefab is unavailable: "..gameplay)
+                local ok,module=g.pcall(g.require,gameplay)
+                if not ok or not module then
+                    ok,module=g.pcall(g.require,gameplay:lower())
+                end
+                if ok and module and g.type(module.GetRoot)=="function" then
+                    api.entity.CompilePrefab(module.GetRoot(),gameplay)
+                end
+                g.assert(api.entity.FindPrefab(gameplay),"Scenery gameplay prefab is unavailable: "..gameplay)
+            end
+            if not api.entity.FindPrefab(group.resource) then
+                local ok,module=g.pcall(g.require,group.resource)
+                if not ok or not module then
+                    ok,module=g.pcall(g.require,group.resource:lower())
+                end
+                if ok and module and g.type(module.GetRoot)=="function" then
+                    api.entity.CompilePrefab(module.GetRoot(),group.resource)
+                end
             end
             for _,row in g.ipairs(group.instances) do
                 placements[#placements+1]={resource=group.resource,row=row}
