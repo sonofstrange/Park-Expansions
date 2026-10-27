@@ -5,6 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <wincrypt.h>
+#include <intrin.h>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -120,7 +121,7 @@ static std::wstring wide(const char* source) {
 // Compression & Decompression
 // ---------------------------------------------------------------------------
 
-static std::vector<uint8_t> decompress_zlib(const uint8_t* in, size_t in_len, int wbits = 15) {
+static std::vector<uint8_t> decompress_zlib(const uint8_t* in, size_t in_len, int wbits = -15) {
     z_stream strm{};
     if (inflateInit2(&strm, wbits) != Z_OK) throw std::runtime_error("inflateInit2 failed");
     strm.next_in = const_cast<uint8_t*>(in);
@@ -187,7 +188,7 @@ static uint32_t read_uint(const uint8_t* data, size_t len, size_t& pos) {
         }
         return val;
     }
-    throw std::runtime_error("Unexpected scalar tag");
+    throw std::runtime_error("Unexpected scalar tag: " + std::to_string(tag));
 }
 
 static void put_uint(std::vector<uint8_t>& out, uint32_t value) {
@@ -211,39 +212,141 @@ static void put_uint(std::vector<uint8_t>& out, uint32_t value) {
     }
 }
 
-static std::vector<uint8_t> decode_density(const uint8_t* data, size_t len) {
-    std::vector<uint8_t> values;
-    size_t pos = 0;
-    uint8_t current = 0;
-    while (pos < len) {
-        uint32_t rle = read_uint(data, len, pos);
-        if (rle > 0) {
-            values.insert(values.end(), rle, current);
-        }
-        if (pos < len) {
-            current = (current + data[pos++]) & 0xff;
-            values.push_back(current);
-        }
-    }
-    return values;
+static std::vector<uint8_t> unpack_game_save(const std::vector<uint8_t>& data, std::vector<uint8_t>& preamble) {
+    if (data.size() < 17) throw std::runtime_error("File too small");
+    preamble.assign(data.begin(), data.begin() + 17);
+    return decompress_zlib(data.data() + 17, data.size() - 17, -15);
 }
 
-static std::vector<uint8_t> encode_density(const uint8_t* values, size_t len) {
-    std::vector<uint8_t> out;
-    size_t i = 0;
-    uint8_t current = 0;
-    while (i < len) {
-        size_t start = i;
-        while (i < len && values[i] == current) ++i;
-        put_uint(out, static_cast<uint32_t>(i - start));
-        if (i < len) {
-            uint8_t diff = (values[i] - current) & 0xff;
-            out.push_back(diff);
-            current = values[i];
-            ++i;
+// ---------------------------------------------------------------------------
+// Voxel Volume Structures & Serialization
+// ---------------------------------------------------------------------------
+
+struct RootInfo {
+    size_t tree_begin;
+    size_t tree_end;
+    size_t sample_begin;
+    size_t sample_end;
+    uint8_t sign;
+};
+
+struct Volume {
+    uint32_t version;
+    uint32_t shape[3];
+    uint32_t block;
+    uint32_t samples;
+    std::vector<uint8_t> signs;
+    std::vector<uint8_t> tree;
+    std::vector<uint8_t> deltas;
+    std::vector<uint8_t> materials;
+    std::vector<RootInfo> roots;
+};
+
+static Volume parse_volume(const uint8_t* data, size_t len) {
+    Volume v{};
+    size_t p = 0;
+    v.version = read_uint(data, len, p);
+    assert(v.version == 5);
+    for (int i = 0; i < 3; ++i) v.shape[i] = read_uint(data, len, p);
+    v.block = read_uint(data, len, p);
+    assert(v.block == 512);
+    uint32_t scale = read_uint(data, len, p);
+    assert(scale == 1);
+    assert(data[p] == 0);
+    p++;
+    uint32_t root_count = v.shape[0] * v.shape[1] * v.shape[2];
+    size_t signs_len = (root_count + 7) / 8;
+    v.signs.assign(data + p, data + p + signs_len);
+    p += signs_len;
+
+    uint32_t tree_size = read_uint(data, len, p);
+    v.samples = read_uint(data, len, p);
+    v.tree.assign(data + p, data + p + tree_size);
+    p += tree_size;
+    v.deltas.assign(data + p, data + p + v.samples);
+    p += v.samples;
+    v.materials.assign(data + p, data + len);
+
+    size_t index = 0;
+    size_t samples = 0;
+    auto walk = [&](auto& self, uint32_t side) -> void {
+        assert(index < v.tree.size());
+        uint8_t mask = v.tree[index++];
+        if (side == 2) {
+            samples += __popcnt(mask);
+            return;
         }
+        uint8_t flags = v.tree[index++];
+        assert((flags & ~mask) == 0);
+        for (int child = 0; child < 8; ++child) {
+            if ((mask >> child) & 1) {
+                self(self, side / 2);
+            }
+        }
+    };
+
+    for (uint32_t root = 0; root < root_count; ++root) {
+        size_t a = index, b = samples;
+        walk(walk, v.block);
+        uint8_t sign = (v.signs[root / 8] >> (root % 8)) & 1;
+        v.roots.push_back({a, index, b, samples, sign});
+    }
+    assert(index == v.tree.size());
+    assert(samples == v.samples);
+    return v;
+}
+
+static std::vector<uint8_t> decode_density(const uint8_t* deltas, size_t count) {
+    std::vector<uint8_t> out(count);
+    uint8_t acc = 0;
+    for (size_t i = 0; i < count; ++i) {
+        acc += deltas[i];
+        out[i] = acc;
     }
     return out;
+}
+
+static std::vector<uint8_t> encode_density(const uint8_t* values, size_t count) {
+    std::vector<uint8_t> out(count);
+    uint8_t prev = 0;
+    for (size_t i = 0; i < count; ++i) {
+        out[i] = static_cast<uint8_t>(values[i] - prev);
+        prev = values[i];
+    }
+    return out;
+}
+
+struct MaterialPart {
+    std::vector<uint8_t> plane[3];
+    std::vector<uint8_t> codes;
+};
+
+static std::vector<MaterialPart> extract_material_parts(const Volume& v) {
+    size_t n = v.samples;
+    const uint8_t* p0 = v.materials.data();
+    const uint8_t* p1 = p0 + n;
+    const uint8_t* p2 = p1 + n;
+    const uint8_t* codes = p2 + n;
+
+    std::vector<MaterialPart> parts;
+    size_t cp = 0;
+    for (const auto& r : v.roots) {
+        MaterialPart mp;
+        size_t count = r.sample_end - r.sample_begin;
+        for (int i = 0; i < 3; ++i) {
+            const uint8_t* src = (i == 0 ? p0 : (i == 1 ? p1 : p2)) + r.sample_begin;
+            mp.plane[i].assign(src, src + count);
+        }
+        size_t code_bytes = count;
+        for (size_t k = 0; k < count; ++k) {
+            if (mp.plane[0][k] != 0 || mp.plane[1][k] != 0) code_bytes++;
+        }
+        mp.codes.assign(codes + cp, codes + cp + code_bytes);
+        cp += code_bytes;
+        parts.push_back(std::move(mp));
+    }
+    assert(cp == v.materials.size() - 3 * n);
+    return parts;
 }
 
 // ---------------------------------------------------------------------------
@@ -252,130 +355,100 @@ static std::vector<uint8_t> encode_density(const uint8_t* values, size_t len) {
 
 struct ClientBlock {
     std::string name;
-    size_t start, version_end, end;
+    size_t name_end;
+    size_t version_end;
+    size_t end;
 };
 
-struct ClientArchiveInfo {
-    size_t header_len;
+struct ClientsInfo {
+    size_t size_start;
+    size_t size_end;
+    std::vector<uint32_t> sizes;
     std::vector<ClientBlock> blocks;
 };
 
-static std::vector<uint8_t> unpack_game_save(const std::vector<uint8_t>& data, std::vector<uint8_t>& preamble) {
-    if (data.size() < 17) throw std::runtime_error("File too small");
-    preamble.assign(data.begin(), data.begin() + 17);
-    return decompress_zlib(data.data() + 17, data.size() - 17, -15);
-}
+static ClientsInfo parse_clients(const std::vector<uint8_t>& raw) {
+    ClientsInfo info{};
+    const char marker[] = "ClientSizes>";
+    auto it = std::search(raw.begin(), raw.end(), marker, marker + 12);
+    if (it == raw.end()) throw std::runtime_error("ClientSizes> not found");
+    info.size_start = std::distance(raw.begin(), it) + 12;
 
-static ClientArchiveInfo parse_clients(const std::vector<uint8_t>& raw) {
-    ClientArchiveInfo info;
-    size_t p = 0;
-    uint32_t count = read_uint(raw.data(), raw.size(), p);
-    info.header_len = p;
+    size_t pos = info.size_start;
+    uint32_t count = read_uint(raw.data(), raw.size(), pos);
     for (uint32_t i = 0; i < count; ++i) {
-        size_t start = p;
-        uint32_t name_len = read_uint(raw.data(), raw.size(), p);
-        std::string name(reinterpret_cast<const char*>(raw.data() + p), name_len);
-        p += name_len;
-        size_t version_end = p;
-        p += 2;
-        uint32_t block_len = read_uint(raw.data(), raw.size(), p);
-        p += block_len;
-        info.blocks.push_back({name, start, version_end, p});
+        info.sizes.push_back(read_uint(raw.data(), raw.size(), pos));
+    }
+    info.size_end = pos;
+
+    struct RawMatch {
+        std::string name;
+        size_t name_end;
+    };
+    std::vector<RawMatch> raw_matches;
+    const uint8_t prefix1[] = {'H','e','a','d','e','r','C','l','i','e','n','t','>','>', 0xf3};
+    const uint8_t prefix2[] = {'C','l','i','e','n','t','C','l','i','e','n','t','>','>', 0xf3};
+
+    for (size_t i = info.size_end; i + 16 < raw.size(); ++i) {
+        if (std::memcmp(raw.data() + i, prefix1, 15) == 0 || std::memcmp(raw.data() + i, prefix2, 15) == 0) {
+            size_t name_start = i + 15;
+            size_t name_end = name_start;
+            while (name_end < raw.size() && raw[name_end] != 0 && (name_end - name_start) < 100) {
+                name_end++;
+            }
+            if (name_end < raw.size() && raw[name_end] == 0 && name_end > name_start) {
+                std::string name(reinterpret_cast<const char*>(raw.data() + name_start), name_end - name_start);
+                raw_matches.push_back({name, name_end + 1});
+                i = name_end;
+            }
+        }
+    }
+    if (raw_matches.size() != count) throw std::runtime_error("Client blocks count mismatch");
+
+    for (uint32_t i = 0; i < count; ++i) {
+        size_t vpos = raw_matches[i].name_end;
+        uint32_t version = read_uint(raw.data(), raw.size(), vpos);
+        size_t version_end = vpos;
+        size_t block_end = version_end + info.sizes[i];
+
+        if (block_end + 8 > raw.size() || std::memcmp(raw.data() + block_end, "<<Client", 8) != 0) {
+            throw std::runtime_error("<<Client delimiter not found for block " + raw_matches[i].name);
+        }
+        info.blocks.push_back({raw_matches[i].name, raw_matches[i].name_end, version_end, block_end});
     }
     return info;
 }
 
-static std::vector<uint8_t> patch_client(const std::vector<uint8_t>& raw, const std::string& target_client, const std::vector<uint8_t>& replacement_body) {
+static std::vector<uint8_t> patch_client(const std::vector<uint8_t>& raw, const std::string& client_name, const std::vector<uint8_t>& replacement) {
     auto info = parse_clients(raw);
-    const ClientBlock* target = nullptr;
-    for (const auto& b : info.blocks) {
-        if (b.name == target_client) { target = &b; break; }
-    }
-    if (!target) throw std::runtime_error("Target client not found: " + target_client);
-
-    std::vector<uint8_t> out;
-    out.insert(out.end(), raw.begin(), raw.begin() + target->start);
-    put_uint(out, static_cast<uint32_t>(target_client.size()));
-    out.insert(out.end(), target_client.begin(), target_client.end());
-    out.insert(out.end(), raw.begin() + target->version_end, raw.begin() + target->version_end + 2);
-    put_uint(out, static_cast<uint32_t>(replacement_body.size()));
-    out.insert(out.end(), replacement_body.begin(), replacement_body.end());
-    out.insert(out.end(), raw.begin() + target->end, raw.end());
-    return out;
-}
-
-// ---------------------------------------------------------------------------
-// Voxel Octree & Volume Parsing
-// ---------------------------------------------------------------------------
-
-struct OctreeNode {
-    uint8_t child_mask;
-    uint8_t leaf_mask;
-    uint16_t child_offset;
-    uint16_t leaf_offset;
-};
-
-struct VoxelTerrain {
-    OctreeNode root;
-    std::vector<OctreeNode> nodes;
-    std::vector<uint8_t> leaves;
-    std::vector<uint8_t> materials[4];
-};
-
-struct Volume {
-    uint32_t width_chunks, height_layers, depth_chunks, chunk_size, scale;
-    std::vector<uint8_t> signs;
-    std::vector<uint8_t> tree;
-    std::vector<uint8_t> deltas;
-    std::vector<uint8_t> materials;
-};
-
-static Volume parse_volume(const uint8_t* data, size_t len) {
-    Volume v;
-    size_t p = 8;
-    v.width_chunks = read_uint(data, len, p);
-    v.height_layers = read_uint(data, len, p);
-    v.depth_chunks = read_uint(data, len, p);
-    v.chunk_size = read_uint(data, len, p);
-    v.scale = read_uint(data, len, p);
-    p += 1;
-    size_t sign_bytes = (v.width_chunks * v.height_layers * v.depth_chunks + 7) / 8;
-    v.signs.assign(data + p, data + p + sign_bytes);
-    p += sign_bytes;
-    uint32_t tree_bytes = read_uint(data, len, p);
-    uint32_t delta_bytes = read_uint(data, len, p);
-    v.tree.assign(data + p, data + p + tree_bytes);
-    p += tree_bytes;
-    v.deltas.assign(data + p, data + p + delta_bytes);
-    p += delta_bytes;
-    v.materials.assign(data + p, data + len);
-    return v;
-}
-
-struct MaterialParts {
-    std::vector<uint8_t> parts[4];
-};
-
-static MaterialParts extract_material_parts(const Volume& vol) {
-    MaterialParts mp;
-    size_t p = 0;
-    size_t count = 0;
-    for (uint8_t b : vol.tree) {
-        if (b & 1) count += ((b >> 1) & 0x7f) + 1;
-    }
-    for (int part = 0; part < 4; ++part) {
-        size_t remaining = count;
-        while (remaining > 0) {
-            uint32_t run = read_uint(vol.materials.data(), vol.materials.size(), p);
-            put_uint(mp.parts[part], run);
-            remaining -= run;
-            if (remaining > 0) {
-                mp.parts[part].push_back(vol.materials[p++]);
-                remaining--;
-            }
+    int target_idx = -1;
+    for (size_t i = 0; i < info.blocks.size(); ++i) {
+        if (info.blocks[i].name == client_name) {
+            target_idx = static_cast<int>(i);
+            break;
         }
     }
-    return mp;
+    if (target_idx < 0) throw std::runtime_error("Client not found: " + client_name);
+    const auto& block = info.blocks[target_idx];
+
+    const uint8_t marker[] = {0x05, 0x02, 0x01, 0x02, 0xc2, 0x00, 0x01, 0x00};
+    auto it = std::search(raw.begin() + block.version_end, raw.begin() + block.end, std::begin(marker), std::end(marker));
+    if (it == raw.begin() + block.end) throw std::runtime_error("Marker not found in client block");
+    size_t pos = std::distance(raw.begin(), it);
+
+    info.sizes[target_idx] += static_cast<uint32_t>(replacement.size() - (block.end - pos));
+
+    std::vector<uint8_t> result;
+    result.insert(result.end(), raw.begin(), raw.begin() + info.size_start);
+    put_uint(result, static_cast<uint32_t>(info.sizes.size()));
+    for (uint32_t s : info.sizes) {
+        put_uint(result, s);
+    }
+    result.insert(result.end(), raw.begin() + info.size_end, raw.begin() + pos);
+    result.insert(result.end(), replacement.begin(), replacement.end());
+    result.insert(result.end(), raw.begin() + block.end, raw.end());
+
+    return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -383,162 +456,261 @@ static MaterialParts extract_material_parts(const Volume& vol) {
 // ---------------------------------------------------------------------------
 
 struct StockTerrain {
-    std::vector<float> heights;
-    std::vector<uint8_t> weights[3];
-    std::vector<uint16_t> classes;
+    std::vector<float> height;
+    std::vector<uint8_t> aux;
+    uint32_t world_x = 0, world_z = 0;
     uint32_t nx = 0, nz = 0;
-    float span = 0.0f, offset = 0.0f;
+    float span = 0, offset = 0, water = 0;
+    uint16_t material_lookup[65536]{};
 
     void load(const fs::path& skirt_path) {
         auto packed = read_file(skirt_path);
+        assert(packed.size() > 4 && std::memcmp(packed.data(), "BHMP", 4) == 0);
         auto raw = decompress_zlib(packed.data() + 4, packed.size() - 4, -15);
-        nx = *reinterpret_cast<const uint32_t*>(raw.data() + 12);
-        nz = *reinterpret_cast<const uint32_t*>(raw.data() + 16);
-        span = *reinterpret_cast<const float*>(raw.data() + 24);
-        offset = *reinterpret_cast<const float*>(raw.data() + 28);
-        size_t p = 37 + 4 * raw[36];
-        const uint16_t* u16 = reinterpret_cast<const uint16_t*>(raw.data() + p + 4);
-        size_t total = nx * nz;
-        heights.resize(total);
-        for (size_t i = 0; i < total; ++i) {
-            heights[i] = static_cast<float>(u16[i]) * (span / 65535.0f) + offset;
-        }
-        p += 4 + total * 2;
-        for (int i = 0; i < 3; ++i) {
-            weights[i].assign(raw.data() + p + 4, raw.data() + p + 4 + total);
-            p += 4 + total;
-        }
-        const uint16_t* cls = reinterpret_cast<const uint16_t*>(raw.data() + p + 4);
-        classes.assign(cls, cls + total);
-    }
+        const uint8_t* p = raw.data();
+        uint32_t version = *reinterpret_cast<const uint32_t*>(p); p += 4;
+        world_x = *reinterpret_cast<const uint32_t*>(p); p += 4;
+        world_z = *reinterpret_cast<const uint32_t*>(p); p += 4;
+        nx = *reinterpret_cast<const uint32_t*>(p); p += 4;
+        nz = *reinterpret_cast<const uint32_t*>(p); p += 4;
+        uint32_t fmt = *reinterpret_cast<const uint32_t*>(p); p += 4;
+        assert(version == 2 && fmt == 2 && nx == 2048 && nz == 2048);
 
-    void sample_point(float x, float z, float& h, uint8_t w[3], uint16_t& cls) const {
-        float u = (x / 2048.0f + 0.5f) * static_cast<float>(nx);
-        float v = (z / 2048.0f + 0.5f) * static_cast<float>(nz);
-        int ix = std::clamp(static_cast<int>(std::floor(u)), 0, static_cast<int>(nx) - 2);
-        int iz = std::clamp(static_cast<int>(std::floor(v)), 0, static_cast<int>(nz) - 2);
-        float a = u - static_cast<float>(ix);
-        float b = v - static_cast<float>(iz);
-        size_t idx00 = iz * nx + ix;
-        size_t idx01 = idx00 + 1;
-        size_t idx10 = (iz + 1) * nx + ix;
-        size_t idx11 = idx10 + 1;
-        h = heights[idx00] * (1 - a) * (1 - b) + heights[idx01] * a * (1 - b) +
-            heights[idx10] * (1 - a) * b + heights[idx11] * a * b;
-        for (int i = 0; i < 3; ++i) {
-            float fw = weights[i][idx00] * (1 - a) * (1 - b) + weights[i][idx01] * a * (1 - b) +
-                       weights[i][idx10] * (1 - a) * b + weights[i][idx11] * a * b;
-            w[i] = static_cast<uint8_t>(std::clamp(static_cast<int>(std::round(fw)), 0, 255));
-        }
-        cls = classes[idx00];
-    }
-};
+        span = *reinterpret_cast<const float*>(p); p += 4;
+        offset = *reinterpret_cast<const float*>(p); p += 4;
+        water = *reinterpret_cast<const float*>(p); p += 4;
 
-struct MipPyramid {
-    std::vector<float> levels[9];
-    float min_h, max_h;
-};
+        uint8_t flag36 = *p;
+        p = raw.data() + (37 + 4 * flag36);
+        uint32_t height_count = *reinterpret_cast<const uint32_t*>(p); p += 4;
+        assert(height_count == nx * nz * 2);
 
-static void init_mip_pyramid(MipPyramid& mip, const StockTerrain& stock, int cx, int cz, int size) {
-    float origin_x = -size / 2.0f + cx * 512.0f;
-    float origin_z = -size / 2.0f + cz * 512.0f;
-    mip.levels[0].resize(513 * 513);
-    float h_min = 1e9f, h_max = -1e9f;
-    uint8_t dummy_w[3]; uint16_t dummy_c;
-    for (int z = 0; z <= 512; ++z) {
-        float pz = origin_z + z;
-        for (int x = 0; x <= 512; ++x) {
-            float px = origin_x + x;
-            float h;
-            stock.sample_point(px, pz, h, dummy_w, dummy_c);
-            mip.levels[0][z * 513 + x] = h;
-            if (h < h_min) h_min = h;
-            if (h > h_max) h_max = h;
+        height.resize(nx * nz);
+        const uint16_t* u16 = reinterpret_cast<const uint16_t*>(p);
+        float scale = span / 65535.0f;
+        for (size_t i = 0; i < nx * nz; ++i) {
+            height[i] = u16[i] * scale + offset;
         }
-    }
-    mip.min_h = h_min; mip.max_h = h_max;
-    for (int lvl = 1; lvl <= 8; ++lvl) {
-        int dim = (512 >> lvl) + 1;
-        int prev_dim = (512 >> (lvl - 1)) + 1;
-        mip.levels[lvl].resize(dim * dim);
-        for (int z = 0; z < dim; ++z) {
-            for (int x = 0; x < dim; ++x) {
-                float v = (mip.levels[lvl - 1][(z * 2) * prev_dim + (x * 2)] +
-                           mip.levels[lvl - 1][(z * 2) * prev_dim + (x * 2 + 1)] +
-                           mip.levels[lvl - 1][(z * 2 + 1) * prev_dim + (x * 2)] +
-                           mip.levels[lvl - 1][(z * 2 + 1) * prev_dim + (x * 2 + 1)]) * 0.25f;
-                mip.levels[lvl][z * dim + x] = v;
+        p += height_count;
+
+        uint32_t aux_count = *reinterpret_cast<const uint32_t*>(p); p += 4;
+        assert(aux_count == nx * nz * 8);
+        aux.assign(p, p + aux_count);
+        p += aux_count;
+
+        uint32_t mat_count = *reinterpret_cast<const uint32_t*>(p); p += 4;
+        assert(mat_count == 16);
+
+        bool seen[65536]{};
+        for (size_t i = 0; i < nx * nz; ++i) {
+            uint16_t mask = aux[i * 8] | (static_cast<uint16_t>(aux[i * 8 + 1]) << 8);
+            if (!seen[mask]) {
+                seen[mask] = true;
+                std::vector<uint8_t> ids;
+                for (int bit = 0; bit < 16; ++bit) {
+                    if ((mask >> bit) & 1) ids.push_back(static_cast<uint8_t>(bit));
+                }
+                while (ids.size() < 4) {
+                    for (int cand = 0; cand < 16; ++cand) {
+                        bool has = false;
+                        for (auto id : ids) if (id == cand) { has = true; break; }
+                        if (!has) { ids.push_back(static_cast<uint8_t>(cand)); break; }
+                    }
+                }
+                uint16_t code = ids[0] | (ids[1] << 4) | (ids[2] << 8) | (ids[3] << 12);
+                material_lookup[mask] = code;
             }
         }
     }
-}
+
+    void sample_point(float x, float z, float& out_h, uint8_t weights[3], uint16_t& out_code) const {
+        float u = (x / world_x + 0.5f) * nx;
+        float v = (z / world_z + 0.5f) * nz;
+        int ix = static_cast<int>(std::floor(u));
+        int iz = static_cast<int>(std::floor(v));
+        if (ix < 0) ix = 0; if (ix >= static_cast<int>(nx) - 1) ix = nx - 2;
+        if (iz < 0) iz = 0; if (iz >= static_cast<int>(nz) - 1) iz = nz - 2;
+        float a = u - ix;
+        float b = v - iz;
+        float h00 = height[iz * nx + ix];
+        float h10 = height[iz * nx + ix + 1];
+        float h01 = height[(iz + 1) * nx + ix];
+        float h11 = height[(iz + 1) * nx + ix + 1];
+        out_h = h00 * (1 - a) * (1 - b) + h10 * a * (1 - b) + h01 * (1 - a) * b + h11 * a * b;
+
+        int ru = static_cast<int>(std::round(u));
+        int rv = static_cast<int>(std::round(v));
+        if (ru < 0) ru = 0; if (ru >= static_cast<int>(nx)) ru = nx - 1;
+        if (rv < 0) rv = 0; if (rv >= static_cast<int>(nz)) rv = nz - 1;
+        size_t aux_idx = (rv * nx + ru) * 8;
+        uint16_t mask = aux[aux_idx] | (static_cast<uint16_t>(aux[aux_idx + 1]) << 8);
+        out_code = material_lookup[mask];
+        weights[0] = aux[aux_idx + 7];
+        weights[1] = aux[aux_idx + 6];
+        weights[2] = aux[aux_idx + 5];
+    }
+};
 
 // ---------------------------------------------------------------------------
 // Octree Generator
 // ---------------------------------------------------------------------------
 
-struct GeneratedChunk {
+struct OctreeNodeResult {
     std::vector<uint8_t> tree;
     std::vector<uint8_t> density;
     std::vector<uint8_t> mat[4];
+    uint8_t sign;
 };
 
-static void build_octree_node(int level, float x, float y, float z, float size,
-                              const MipPyramid& mip, const StockTerrain& stock,
-                              GeneratedChunk& chunk) {
-    if (level == 8) {
-        uint8_t dummy_w[3]; uint16_t cls;
-        float h;
-        stock.sample_point(x + 0.5f, z + 0.5f, h, dummy_w, cls);
-        float d = (y + 0.5f) - h;
-        uint8_t d_byte = static_cast<uint8_t>(std::clamp(static_cast<int>(std::round(d * 16.0f + 128.0f)), 0, 255));
-        chunk.tree.push_back(1);
-        chunk.density.push_back(d_byte);
-        chunk.mat[0].push_back(dummy_w[0]);
-        chunk.mat[1].push_back(dummy_w[1]);
-        chunk.mat[2].push_back(dummy_w[2]);
-        chunk.mat[3].push_back(cls & 0xff);
-        return;
-    }
+struct MipPyramid {
+    std::vector<float> min_mip[10];
+    std::vector<float> max_mip[10];
+    std::vector<float> heights;
+    std::vector<uint8_t> weights[3];
+    std::vector<uint16_t> codes;
+};
 
-    float half = size * 0.5f;
-    uint8_t child_mask = 0;
-    uint8_t leaf_mask = 0;
+static void init_mip_pyramid(MipPyramid& mip, const StockTerrain& stock, int root_x, int root_z, int size) {
+    mip.heights.resize(512 * 512);
+    for (int i = 0; i < 3; ++i) mip.weights[i].resize(512 * 512);
+    mip.codes.resize(512 * 512);
 
-    for (int child = 0; child < 8; ++child) {
-        float cx = x + ((child & 1) ? half : 0.0f);
-        float cy = y + ((child & 2) ? half : 0.0f);
-        float cz = z + ((child & 4) ? half : 0.0f);
+    int base_x = root_x * 512 - size / 2;
+    int base_z = root_z * 512 - size / 2;
 
-        if (cy + half < mip.min_h - 4.0f) {
-            leaf_mask |= (1 << child);
-        } else if (cy > mip.max_h + 4.0f) {
-            // Air: neither child nor solid leaf
-        } else {
-            child_mask |= (1 << child);
+    for (int z = 0; z < 512; ++z) {
+        for (int x = 0; x < 512; ++x) {
+            float h;
+            uint8_t w[3];
+            uint16_t c;
+            stock.sample_point(static_cast<float>(base_x + x), static_cast<float>(base_z + z), h, w, c);
+            mip.heights[z * 512 + x] = h;
+            mip.weights[0][z * 512 + x] = w[0];
+            mip.weights[1][z * 512 + x] = w[1];
+            mip.weights[2][z * 512 + x] = w[2];
+            mip.codes[z * 512 + x] = c;
         }
     }
 
-    if (child_mask == 0 && leaf_mask == 0) {
-        chunk.tree.push_back(0); // Uniform air
-        return;
-    }
-    if (child_mask == 0 && leaf_mask == 0xff) {
-        chunk.tree.push_back(2); // Uniform solid
-        return;
-    }
+    mip.min_mip[0] = mip.heights;
+    mip.max_mip[0] = mip.heights;
 
-    chunk.tree.push_back(0x80 | (child_mask & 0x7f));
-    chunk.tree.push_back(leaf_mask);
+    for (int lvl = 1; lvl <= 9; ++lvl) {
+        int prev_dim = 512 >> (lvl - 1);
+        int cur_dim = 512 >> lvl;
+        mip.min_mip[lvl].resize(cur_dim * cur_dim);
+        mip.max_mip[lvl].resize(cur_dim * cur_dim);
+        const auto& prev_min = mip.min_mip[lvl - 1];
+        const auto& prev_max = mip.max_mip[lvl - 1];
 
-    for (int child = 0; child < 8; ++child) {
-        if (child_mask & (1 << child)) {
-            float cx = x + ((child & 1) ? half : 0.0f);
-            float cy = y + ((child & 2) ? half : 0.0f);
-            float cz = z + ((child & 4) ? half : 0.0f);
-            build_octree_node(level + 1, cx, cy, cz, half, mip, stock, chunk);
+        for (int z = 0; z < cur_dim; ++z) {
+            for (int x = 0; x < cur_dim; ++x) {
+                int z2 = z * 2;
+                int x2 = x * 2;
+                float mn = std::min({
+                    prev_min[z2 * prev_dim + x2],
+                    prev_min[(z2 + 1) * prev_dim + x2],
+                    prev_min[z2 * prev_dim + x2 + 1],
+                    prev_min[(z2 + 1) * prev_dim + x2 + 1]
+                });
+                float mx = std::max({
+                    prev_max[z2 * prev_dim + x2],
+                    prev_max[(z2 + 1) * prev_dim + x2],
+                    prev_max[z2 * prev_dim + x2 + 1],
+                    prev_max[(z2 + 1) * prev_dim + x2 + 1]
+                });
+                mip.min_mip[lvl][z * cur_dim + x] = mn;
+                mip.max_mip[lvl][z * cur_dim + x] = mx;
+            }
         }
     }
+}
+
+static OctreeNodeResult build_octree_node(const MipPyramid& mip, int side, int x, int y, int z) {
+    int lvl = 0;
+    while ((1 << lvl) < side) lvl++;
+    int dim = 512 >> lvl;
+    int mx = x / side;
+    int mz = z / side;
+    float low = mip.min_mip[lvl][mz * dim + mx];
+    float high = mip.max_mip[lvl][mz * dim + mx];
+
+    if (y + side <= static_cast<int>(std::floor(low)) - 1) {
+        OctreeNodeResult res;
+        if (side == 2) res.tree.push_back(0);
+        else { res.tree.push_back(0); res.tree.push_back(0); }
+        res.sign = 0;
+        return res;
+    }
+    if (y >= static_cast<int>(std::ceil(high)) + 2) {
+        OctreeNodeResult res;
+        if (side == 2) res.tree.push_back(0);
+        else { res.tree.push_back(0); res.tree.push_back(0); }
+        res.sign = 1;
+        return res;
+    }
+
+    uint8_t sign = static_cast<uint8_t>(y >= mip.heights[z * 512 + x]);
+
+    if (side == 2) {
+        OctreeNodeResult res;
+        res.tree.push_back(0xff);
+        res.sign = sign;
+        res.density.resize(8);
+        for (int i = 0; i < 8; ++i) {
+            int vx = x + (i >> 2);
+            int vy = y + ((i >> 1) & 1);
+            int vz = z + (i & 1);
+            float diff = (vy - mip.heights[vz * 512 + vx]) * 127.0f;
+            int rounded = static_cast<int>(std::round(diff));
+            if (rounded < -127) rounded = -127;
+            if (rounded > 127) rounded = 127;
+            res.density[i] = static_cast<uint8_t>(rounded & 0xff);
+        }
+
+        for (int p = 0; p < 3; ++p) {
+            res.mat[p].resize(8);
+            for (int i = 0; i < 8; ++i) {
+                int vx = x + (i >> 2);
+                int vz = z + (i & 1);
+                res.mat[p][i] = mip.weights[p][vz * 512 + vx];
+            }
+        }
+        for (int i = 0; i < 8; ++i) {
+            int vx = x + (i >> 2);
+            int vz = z + (i & 1);
+            uint16_t code = mip.codes[vz * 512 + vx];
+            bool two_bytes = (res.mat[0][i] != 0) || (res.mat[1][i] != 0);
+            if (two_bytes) {
+                res.mat[3].push_back(static_cast<uint8_t>(code & 0xff));
+                res.mat[3].push_back(static_cast<uint8_t>((code >> 8) & 0xff));
+            } else {
+                res.mat[3].push_back(static_cast<uint8_t>(code & 0xff));
+            }
+        }
+        return res;
+    }
+
+    int h = side / 2;
+    OctreeNodeResult children[8];
+    uint8_t flags = 0;
+    for (int i = 0; i < 8; ++i) {
+        children[i] = build_octree_node(mip, h, x + (i >> 2) * h, y + ((i >> 1) & 1) * h, z + (i & 1) * h);
+        if (children[i].sign) flags |= (1 << i);
+    }
+
+    OctreeNodeResult res;
+    res.sign = sign;
+    res.tree.push_back(255);
+    res.tree.push_back(flags);
+    for (int i = 0; i < 8; ++i) {
+        res.tree.insert(res.tree.end(), children[i].tree.begin(), children[i].tree.end());
+        res.density.insert(res.density.end(), children[i].density.begin(), children[i].density.end());
+        for (int c = 0; c < 4; ++c) {
+            res.mat[c].insert(res.mat[c].end(), children[i].mat[c].begin(), children[i].mat[c].end());
+        }
+    }
+    return res;
 }
 
 // ---------------------------------------------------------------------------
@@ -861,8 +1033,12 @@ static void prepare_map(const fs::path& mod_dir, const std::string& biome_arg, c
 
         auto info_bin = parse_clients(raw_bin);
         auto client_it = std::find_if(info_bin.blocks.begin(), info_bin.blocks.end(), [](const ClientBlock& b) { return b.name == "VoxelTerrain"; });
+        if (client_it == info_bin.blocks.end()) throw std::runtime_error("VoxelTerrain not found in source bin");
+
         const uint8_t marker[] = {0x05, 0x02, 0x01, 0x02, 0xc2, 0x00, 0x01, 0x00};
         auto it = std::search(raw_bin.begin() + client_it->version_end, raw_bin.begin() + client_it->end, std::begin(marker), std::end(marker));
+        if (it == raw_bin.begin() + client_it->end) throw std::runtime_error("Terrain marker not found in source bin");
+
         Volume old_vol = parse_volume(&*it, std::distance(it, raw_bin.begin() + client_it->end));
         auto old_densities = decode_density(old_vol.deltas.data(), old_vol.deltas.size());
         auto old_mats = extract_material_parts(old_vol);
@@ -880,6 +1056,7 @@ static void prepare_map(const fs::path& mod_dir, const std::string& biome_arg, c
         std::vector<std::vector<uint8_t>> materials[4];
         for (int c = 0; c < 4; ++c) materials[c].resize(total);
 
+        // Precompute MipPyramids for all (x, z) columns
         std::vector<MipPyramid> mips(width * width);
         for (int z = 0; z < width; ++z) {
             for (int x = 0; x < width; ++x) {
@@ -889,86 +1066,61 @@ static void prepare_map(const fs::path& mod_dir, const std::string& biome_arg, c
             }
         }
 
-        size_t old_leaf_ptr = 0;
-        size_t old_chunk_idx = 0;
-        size_t old_mat_ptr = 0;
-
-        int done_chunks = 0;
         for (int z = 0; z < width; ++z) {
             for (int y = 0; y < 9; ++y) {
                 for (int x = 0; x < width; ++x) {
-                    int idx = (z * 9 + y) * width + x;
-                    if (x >= inner && x <= inner + 1 && z >= inner && z <= inner + 1) {
-                        int byte_idx = old_chunk_idx / 8;
-                        int bit_idx = old_chunk_idx % 8;
-                        if (old_vol.signs[byte_idx] & (1 << bit_idx)) {
-                            signs[idx / 8] |= (1 << (idx % 8));
-                        }
-                        size_t p = 0;
-                        size_t tree_start = p;
-                        std::function<void()> skip_tree = [&]() {
-                            uint8_t b = old_vol.tree[tree_start + p++];
-                            if (b & 0x80) {
-                                uint8_t cm = b & 0x7f;
-                                uint8_t lm = old_vol.tree[tree_start + p++];
-                                for (int ch = 0; ch < 8; ++ch) {
-                                    if (cm & (1 << ch)) skip_tree();
-                                }
-                            }
-                        };
-                        skip_tree();
-                        size_t tree_len = p;
-                        chunks[idx].assign(old_vol.tree.begin() + tree_start, old_vol.tree.begin() + tree_start + tree_len);
+                    int index = (z * 9 + y) * width + x;
+                    if (index % 10 == 0) {
+                        progress(5 + (index * 70) / total, "Preparing terrain: " + std::to_string(index + 1) + "/" + std::to_string(total));
+                    }
 
-                        size_t leaves_in_chunk = 0;
-                        for (uint8_t b : chunks[idx]) {
-                            if (b & 1) leaves_in_chunk += ((b >> 1) & 0x7f) + 1;
-                        }
+                    std::vector<uint8_t> tree, density;
+                    std::vector<uint8_t> mat[4];
+                    uint8_t sign = 0;
 
-                        densities[idx].assign(old_densities.begin() + old_leaf_ptr, old_densities.begin() + old_leaf_ptr + leaves_in_chunk);
-                        old_leaf_ptr += leaves_in_chunk;
-
-                        for (int c = 0; c < 4; ++c) {
-                            materials[c][idx].assign(old_mats.parts[c].begin() + old_mat_ptr, old_mats.parts[c].begin() + old_mat_ptr + leaves_in_chunk);
-                        }
-                        old_mat_ptr += leaves_in_chunk;
-                        old_chunk_idx++;
+                    if (y == 4 && (x == inner || x == inner + 1) && (z == inner || z == inner + 1)) {
+                        int source = (z - inner) * 2 + (x - inner);
+                        const auto& r = old_vol.roots[source];
+                        tree.assign(old_vol.tree.begin() + r.tree_begin, old_vol.tree.begin() + r.tree_end);
+                        density.assign(old_densities.begin() + r.sample_begin, old_densities.begin() + r.sample_end);
+                        for (int c = 0; c < 3; ++c) mat[c] = old_mats[source].plane[c];
+                        mat[3] = old_mats[source].codes;
+                        sign = r.sign;
+                    } else if ((x == inner || x == inner + 1) && (z == inner || z == inner + 1) && y < 4) {
+                        tree = {0, 0};
+                        sign = 0;
+                    } else if ((x == inner || x == inner + 1) && (z == inner || z == inner + 1) && y > 4) {
+                        tree = {0, 0};
+                        sign = 1;
                     } else {
-                        signs[idx / 8] |= (1 << (idx % 8));
-                        GeneratedChunk gen;
-                        float ox = -size / 2.0f + x * 512.0f;
-                        float oy = -512.0f + y * 512.0f;
-                        float oz = -size / 2.0f + z * 512.0f;
-                        build_octree_node(0, ox, oy, oz, 512.0f, mips[z * width + x], stock, gen);
-                        chunks[idx] = std::move(gen.tree);
-                        densities[idx] = std::move(gen.density);
-                        for (int c = 0; c < 4; ++c) materials[c][idx] = std::move(gen.mat[c]);
+                        auto res = build_octree_node(mips[z * width + x], 512, 0, (y - 2) * 512 - 1280, 0);
+                        tree = std::move(res.tree);
+                        density = std::move(res.density);
+                        for (int c = 0; c < 4; ++c) mat[c] = std::move(res.mat[c]);
+                        sign = res.sign;
                     }
 
-                    done_chunks++;
-                    if (done_chunks % 64 == 0) {
-                        int pct = 10 + (done_chunks * 60) / total;
-                        progress(pct, "Generating terrain octree");
-                    }
+                    signs[index / 8] |= (sign << (index % 8));
+                    chunks[index] = std::move(tree);
+                    densities[index] = std::move(density);
+                    for (int c = 0; c < 4; ++c) materials[c][index] = std::move(mat[c]);
                 }
             }
         }
 
-        progress(70, "Assembling volume buffers");
-        std::vector<uint8_t> all_tree, all_density, all_mat;
-        for (int i = 0; i < total; ++i) {
-            all_tree.insert(all_tree.end(), chunks[i].begin(), chunks[i].end());
-            all_density.insert(all_density.end(), densities[i].begin(), densities[i].end());
-        }
+        std::vector<uint8_t> all_tree;
+        for (const auto& c : chunks) all_tree.insert(all_tree.end(), c.begin(), c.end());
+
+        std::vector<uint8_t> all_density;
+        for (const auto& d : densities) all_density.insert(all_density.end(), d.begin(), d.end());
+
+        std::vector<uint8_t> all_mat;
         for (int c = 0; c < 4; ++c) {
-            for (int i = 0; i < total; ++i) {
-                all_mat.insert(all_mat.end(), materials[c][i].begin(), materials[c][i].end());
-            }
+            for (const auto& m : materials[c]) all_mat.insert(all_mat.end(), m.begin(), m.end());
         }
 
         std::vector<uint8_t> replacement;
-        const uint8_t header_bytes[] = {0x05, 0x02, 0x01, 0x02, 0xc2, 0x00, 0x01, 0x00};
-        replacement.insert(replacement.end(), std::begin(header_bytes), std::end(header_bytes));
+        put_uint(replacement, 5);
         put_uint(replacement, width);
         put_uint(replacement, 9);
         put_uint(replacement, width);

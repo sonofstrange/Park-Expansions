@@ -1,10 +1,10 @@
 {
   "version": "0.52",
   "archive": "Park-Expansions-0.52.zip",
-  "archive_sha256": "7fcc1f83cd28a33a0afb8eec7a831d42029a6702f61c202e09372eff2ceb49cb",
-  "bytes": 240104,
+  "archive_sha256": "db0bab4b13130f8445f9956d3094b8bb300b22e622cfd57bb7cec89979aa2432",
+  "bytes": 248862,
   "file_sha256": {
-    "Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll": "4a1e8130b8867c3363df4edbb7fe4d078cb4186a53ce1c9a3bfa239c23cc5deb",
+    "Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll": "a3017abc17a7cd40705dd0da7fbda912fe0b6884d22bd5414894605379b36f6c",
     "Mod_BoundaryLab/Config.ini": "a186e16eb5ef5d72be820ef5cae13ee0f3d7a476b31bfce9ffe99a99ed7dce69",
     "Mod_BoundaryLab/Main.ovl": "c5a72975979a2d885601fa56c130ad7b0e7208f1941b15297fdc6ddc405542bc",
     "Mod_BoundaryLab/Manifest.xml": "43841d0e4785ef45e81079e19687b6c45f2146467aed9c15bd08edaa14fcb24a"
