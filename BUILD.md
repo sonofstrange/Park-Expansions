@@ -1,4 +1,4 @@
-# Building Park Expansions 0.52
+# Building Park Expansions 0.53
 
 Run commands from the repository root on **64-bit Windows**. Source for every mod-specific compiled component is included. No game executable or save is needed to compile the DLL.
 

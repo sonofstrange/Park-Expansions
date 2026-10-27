@@ -5,7 +5,7 @@ root = Path(__file__).resolve().parents[1]
 source = root / 'work/boundarylab/Mod_BoundaryLab'
 dist = root / 'dist'
 dist.mkdir(exist_ok=True)
-output = dist / 'Park-Expansions-0.52.zip'
+output = dist / 'Park-Expansions-0.53.zip'
 release_dir = dist / 'release/Mod_BoundaryLab'
 
 # Clean previous release directory if exists
@@ -40,7 +40,7 @@ with zipfile.ZipFile(output) as z:
     assert not any(n.endswith('.exe') or n.endswith('.bin') or n.endswith('.trn') or '/AutoConversion/' in n or n.endswith('.park2') for n in z.namelist())
 
 manifest = {
-    'version': '0.52',
+    'version': '0.53',
     'archive': output.name,
     'archive_sha256': hashlib.sha256(output.read_bytes()).hexdigest(),
     'bytes': output.stat().st_size,

@@ -18,7 +18,7 @@ Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open
 
 ## Compatibility
 
-Release version **0.52**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
+Release version **0.53**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
 
 The maximum buildable width is 2040 m on standard 2K maps and 4088 m on 4K maps, leaving a 4 m safety margin at each terrain edge.
 
