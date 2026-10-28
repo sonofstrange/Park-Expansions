@@ -5,12 +5,15 @@ root = Path(__file__).resolve().parents[1]
 source = root / 'work/boundarylab/Mod_BoundaryLab'
 dist = root / 'dist'
 dist.mkdir(exist_ok=True)
-output = dist / 'Park-Expansions-0.53.zip'
+output = dist / 'Park-Expansions-0.56.zip'
 release_dir = dist / 'release/Mod_BoundaryLab'
 
 # Clean previous release directory if exists
-if release_dir.parent.is_dir():
-    shutil.rmtree(release_dir.parent, ignore_errors=True)
+release_root = release_dir.parent.resolve()
+if release_root.parent != dist.resolve() or not release_root.is_relative_to(root.resolve()):
+    raise SystemExit('Release directory is outside the expected dist folder')
+if release_root.is_dir():
+    shutil.rmtree(release_root)
 release_dir.mkdir(parents=True, exist_ok=True)
 
 files = {}
@@ -40,7 +43,7 @@ with zipfile.ZipFile(output) as z:
     assert not any(n.endswith('.exe') or n.endswith('.bin') or n.endswith('.trn') or '/AutoConversion/' in n or n.endswith('.park2') for n in z.namelist())
 
 manifest = {
-    'version': '0.53',
+    'version': '0.56',
     'archive': output.name,
     'archive_sha256': hashlib.sha256(output.read_bytes()).hexdigest(),
     'bytes': output.stat().st_size,

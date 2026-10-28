@@ -2,12 +2,12 @@
 
 # Park Expansions
 
-Expand your park through two research branches: park size and building height. Each branch has five upgrades.
+Expand your park through two research branches: park size and building height. Park Size has five upgrades on 2K maps and seven on 4K maps; Height has five upgrades.
 
-- Buildable area up to **2040 × 2040 m**, within a 2048 × 2048 m terrain volume.
+- Terrain up to **4096 × 4096 m**, with **4088 × 4088 m** of buildable area.
 - Building ceiling up to **world Y = 2048 m**. Individual ride limits may differ.
 - Original landscape retained, with surrounding landscape made editable.
-- Automatic conversion of supported existing local Sandbox and Challenge parks.
+- Existing-save support is experimental; keep a backup and test a copy.
 - Optional manual limits in `Config.ini`, with the research tree disabled.
 
 ## Download and installation
@@ -18,7 +18,7 @@ Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open
 
 ## Compatibility
 
-Release version **0.53**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. Automatic conversion is gated to game build **1.11.3.986758F** and supported local save formats; unsupported parks are left unchanged. Career, Franchise and Workshop-only saves are not supported by the converter.
+Release version **0.56**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. The native bridge is gated to game build **1.11.3.986758F**. Existing-save support is experimental; older conversion paths are not comprehensively validated in this release. Career, Franchise and Workshop-only saves are not supported by the converter.
 
 The maximum buildable width is 2040 m on standard 2K maps and 4088 m on 4K maps, leaving a 4 m safety margin at each terrain edge.
 
@@ -45,9 +45,13 @@ Back up your saves before use. Bugs, crashes, visual glitches and save compatibi
 
 ## Source and review
 
-See [BUILD.md](BUILD.md) for build steps and [REVIEW.md](REVIEW.md) for the executable components and file access. Download the test ZIP only after reviewing the development status below. The source staging directory retains 0.35 map files as regression references; these are excluded from the small package. No player saves or conversion cache are included.
+See [BUILD.md](BUILD.md) for build steps and [REVIEW.md](REVIEW.md) for the executable components and file access. See [CHANGELOG.md](CHANGELOG.md) for current release notes; the development history below describes earlier builds. The source staging directory retains 0.35 map files as regression references; these are excluded from the small package. No player saves or conversion cache are included.
 
-This repository does not grant a new license for Frontier assets or bundled third-party components. Their respective owners' terms apply; bundled Python and PyInstaller notices are retained.
+This repository does not grant a new license for Frontier assets or bundled third-party components. Their respective owners' terms apply. The current archive contains no Python runtime.
+
+## Development history
+
+The following entries describe earlier builds and may refer to components no longer distributed. Guest movement in expanded areas was confirmed in-game for 0.56.
 
 ## 0.37 development: smaller download and loading progress
 
@@ -141,3 +145,33 @@ In addition, 0.51 introduces:
 - Extended 7-tier research tree for 4K maps: Tier VI (3072 m for 400,000 points) and Tier VII (4088 m for 800,000 points).
 - Dynamic UI updates for 2K (5 tiers) and 4K (7 tiers).
 - Diagnostics reported in `Copy Report`: `ENV_CAPTURE_SPAN`, `ENV_CAPTURE_RADIUS`, `ENV_CAPTURE_POINTS`, `ENABLE_4K_MAP`, `MAX_MAP_SIZE`.
+
+
+### 0.54 navigation test (unpublished)
+
+The installed build's native NavigationWorld default initializer (RVA 0x164c500, game 1.11.3.986758) uses fixed bounds (-512,-512,-512)..(512,512,512). Its original calculations derive a 128 x 128 tile domain from those bounds. This test redirects only its two vector loads to private, read-only +/-2048 constants. A complete initializer fingerprint and exact load signatures are checked before changing either instruction. The original engine then calculates a 512 x 512 domain itself. Shared constants, cell size and the existing Detour budget of 16384 active tiles / 256 polygons per tile are retained. This does not guarantee that arbitrarily dense paths across the entire 4K map fit the unchanged active-tile budget.
+
+`work/test_navigation_bounds.py` executes the actual stock and patched, self-contained initializer in private memory (without starting/attaching to the game) and verifies bounds, dimensions, budget, guard rejection and repeat initialization. BridgeDebug.log records initialization and sampled boundary-hook calls. Copy Report includes NAVIGATION_INITIALIZER_HALF_SIZE, BOUNDARY_HOOK_CALLS and BOUNDARY_HOOK_OVERRIDES. The prior boundary detour remains, but a foreign detour is no longer treated as successful installation.
+
+This is a targeted test for guests reversing and facilities reporting no path beyond the original terrain. In-game walking, facility access, existing-save navigation rebuilding and save/reload remain unverified. The current executable build is required; an AOB match alone is not used to authorize patching unknown versions. Existing generator, configuration, caches and save files are retained.
+
+
+### 0.55 navigation test: backward allocation and optional navigation failure
+
+The 0.54 in-game bridge log records a failed allocation for the private RIP-relative bounds vectors. The allocator searched only addresses above the initializer. A saved 4K load was then rejected before CPTWorld initialized, and native teardown terminated on its missing dayNightCycle. No expanded navigation grid had been created in that run.
+
+The allocator now searches both forward and backward RIP windows. A regression test anchors it at the maximum user address, where no forward allocation can succeed, and verifies a backward allocation within range. The private-copy initializer tests still verify +/-2048 bounds and unchanged Detour budgets. A navigation-only initialization failure no longer makes the Sea/terrain component unavailable or aborts loading: the stock navigation domain is retained and NAVIGATION_SETUP_ERROR reports the reason. The existing fail-closed guard for genuinely unsupported Sea code remains. In-game navigation and save/reload still need testing.
+
+
+### 0.56 CrowdSimulation shared-grid test (unpublished)
+
+The user confirmed that 0.55 loads but guests still stop at the original line. Its log confirms the NavigationWorld patch is active and native park-boundary tests accept some positions outside the original plot. PC2's CrowdSimulation uses a separate shared spatial grid: its constructor (0x96c870..0x96d5fd) passes a fixed 1024 m width to both grid axes at RVA 0x96ce28. The checked coordinate lookup at 0x968ae0 rejects points outside the resulting +/-512 domain.
+
+This build redirects that one scalar load to a private, read-only 4096 value. The original grid initializer calculates its extent, center offset and cell dimensions. A full constructor fingerprint and exact instruction check are required before writing. Native offsets, cell scale, lookup math and path data are unchanged. Failures keep the original Crowd domain and are reported as CROWD_GRID_ERROR; they do not abort terrain loading. CROWD_GRID_SIZE and the bridge log distinguish this fix from the unrelated NavigationWorld initializer patch.
+
+`work/test_crowd_grid.py` executes the copied native grid initializer and checked coordinate lookup in private memory. It reproduces rejection at +/-600 m with the stock width and acceptance out to +/-2048 with the new width, while rejecting points outside the new limits. Only the unused bucket-storage allocation is stubbed in this test. At stock scale the bucket metadata grows from 2 MiB to 32 MiB; that is not a measurement of total simulation/GPU memory. Guest routing, facility connections, actual allocations and save/reload remain unverified in-game. Test exports and exception wrappers are compiled only under BRIDGE_TEST.
+
+
+### 0.56 release validation
+
+The user confirmed that guests can now travel beyond the original map boundary. The release keeps the tested CrowdSimulation fix, adds no new gameplay changes over 0.56-crowd-test, and removes test labels from version text. The archive contains only the four mod files; no generated maps, player saves, logs or test binaries are included. See CHANGELOG.md for release notes.

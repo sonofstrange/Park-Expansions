@@ -12,7 +12,10 @@ local serial={RegisterWorldSerialisationClient=function(_,name,version,save,load
  UnregisterWorldSerialisationClient=function()end}
 local w={techtree={GetResearchPoints=function()return balance end,SetResearchPoints=function(_,value)balance=value end},
  park={SetEnforcedPlacementArea=function()error('Do not create mission guide graphics')end,
- ClearEnforcedPlacementArea=function()end},
+ ClearEnforcedPlacementArea=function()enforcedAreaCleared=true end,
+ UnlockAllPlots=function()plotsUnlocked=true end,
+ ClearAllPlotRestrictions=function()plotRestrictionsCleared=true end},
+ crowdsimulation={SetVoxelTerrain=function()end},
  editors={CopyToClipboard=function(_,text)clipboard=text end},worldserialisation=serial,
  voxelterrain={GetPrimaryVoxelTerrainEntityID=function()return 1 end,
  GetWorldBounds=function()return vec(-1024,-2304,-1024),vec(1023,2303,1023)end}}
@@ -86,7 +89,7 @@ assert(#world.boundaryLabResearch.history==4)
 local saved={};saveCallback(saved)
 R.Shutdown(world)
 local other={sandboxSettingsManager=world.sandboxSettingsManager}
-R.BeforeLoad(other);loadCallback(saved);R.AfterLoad(other,templates)
+R.BeforeLoad(other);loadCallback(saved);R.AfterLoad(other,templates);assert(plotsUnlocked and plotRestrictionsCleared and enforcedAreaCleared)
 assert(other.boundaryLabResearch.width==5 and other.boundaryLabResearch.height==5 and box.top==2048)
 assert(other.boundaryLabActiveSeed[1]==1020 and other.boundaryLabTerrainCreated)
 R.Report();assert(clipboard:find('WIDTH_LEVEL=5 HEIGHT_LEVEL=5',1,true))

@@ -76,15 +76,22 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
     function edits:HasChanges() return next(self.posts)~=nil end
     local hierarchy={GetBoundaryChangeList=function() return edits end,
         GetFullUndoChangeList=function() return edits end}
+    local plotsUnlocked,plotRestrictionsCleared,enforcedAreaCleared,crowdTerrainID
     local w={}
     w.park={GetParkName=function() return parkName end,
         GetParkBoundaryPlotUIData=function() return {} end,
+        UnlockAllPlots=function(_,flag) plotsUnlocked=flag end,
+        ClearAllPlotRestrictions=function(_) plotRestrictionsCleared=true end,
+        ClearEnforcedPlacementArea=function(_) enforcedAreaCleared=true end,
         IsPositionWithinParkBoundary=function(_,p)
             local scale = committed > 0 and 1.50 or initialScale
             if committed>0 and rectangleCase then return math.abs(p.x)<=targetHalf+0.001 and math.abs(p.z)<=targetHalf+0.001 end
             return p.x >= bounds[1]*scale and p.x <= bounds[2]*scale
                 and p.z >= bounds[3]*scale and p.z <= bounds[4]*scale
         end}
+    w.crowdsimulation={
+        SetVoxelTerrain=function(id) crowdTerrainID=id end,
+    }
     w.voxelterrain={GetPrimaryVoxelTerrainEntityID=function() return 1 end,
         GetWorldBounds=function() if widthRun then local h=(widthRun.size or 2048)/2;return V:new(-h,-2304,-h),V:new(h-1,2303,h-1) end;return V:new(-1024,-1280,-1024),V:new(1023,1279,1023) end,
         PointTest=function(_,id,p)
@@ -176,7 +183,7 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
         if module=="Helpers.PopUpDialogUtils" then
             return {RunOKDialog=function(_,message)
                 popupCount=popupCount+1
-                assert(clipboardReport and clipboardReport:find("Park Expansions 0.53 report",1,true),"Missing clipboard report")
+                assert(clipboardReport and clipboardReport:find("Park Expansions 0.56 report",1,true),"Missing clipboard report")
                 assert(clipboardReport:find("CONNECTED posts="..#posts.." panels="..#panels,1,true),"Missing contour diagnosis")
                 if not allowCommit then assert(message:find("outsideBounds=true",1,true),"Lost rejection details") end
                 if controlAccepted then assert(message:find("Unchanged contour: accepted",1,true),"Lost control result") end
@@ -231,6 +238,8 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
     elseif allowCommit then
         assert(committed==1 and cancelled==0 and popupCount==(widthRun and widthRun.manual and 0 or 1),"Expected one successful commit")
         assert(editEnabled,"Did not enable boundary editing")
+        assert(plotsUnlocked==true and plotRestrictionsCleared==true and enforcedAreaCleared==true and crowdTerrainID==1,
+            "Expansion must unlock plots, clear restrictions, and update crowd terrain")
         for old,new in pairs(edits.posts) do
             if rectangleCase then
                 assert(math.abs(math.max(math.abs(new.data.vPos.x),math.abs(new.data.vPos.z))-targetHalf)<0.002)

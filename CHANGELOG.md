@@ -2,13 +2,26 @@
 
 All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in this file.
 
+## [0.56] - 2026-10-28
+
+### Fixed
+- Guests can now walk beyond the original map boundary and follow paths in expanded park areas, instead of turning back at the vanilla limit.
+- Extended the crowd navigation grid used by guests and facility path connections to cover 4096 x 4096 m parks.
+- Fixed nearby-memory allocation failing when no suitable address was available above the game code.
+- A navigation setup failure now reports its cause without aborting an otherwise supported terrain load.
+
+### Diagnostics
+- Added `BridgeDebug.log` and navigation/crowd-grid status to **Copy Report**.
+
+Guest movement beyond the original boundary has been confirmed in-game by the user. Save/reload behavior across all supported biomes has not been comprehensively tested.
+
 ## [0.53] - 2026-10-28
 
 ### Highlights (0.51 -> 0.53)
-- **Zero .EXE Architecture (No Executables):**
+- **No Separate EXE Worker:**
   - Completely eliminated all external `.exe` binaries (`ParkExpansionsWorker.exe`) from the mod distribution.
   - The entire terrain voxel generator, octree encoder, and mipmap downsampler now execute inside a native asynchronous background worker thread within `ParkExpansionsBridge.dll`.
-  - Zero antivirus false positives, zero external process spawning, clean and safe mod footprint.
+  - No external worker process or bundled Python runtime. The mod still contains compiled DLL code and may require antivirus or hosting-site review.
 - **Zero Hardcoded Decor Coordinates (Dynamic Extraction):**
   - Completely eliminated all bundled static coordinate tables (`.decor.lua` / `.decor.json`) from the release package.
   - Backdrop scenery (trees, rocks, vegetation) is now parsed and extracted dynamically on-the-fly from the local game assets (`Content0/Worlds/...` and `.bakedHeightMap`) on demand when preparing a park.

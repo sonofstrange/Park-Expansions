@@ -18,7 +18,10 @@
 #include <algorithm>
 #include <functional>
 #include <atomic>
+#include <cstdarg>
 #include "sea_raster.h"
+#include "navigation_bounds.h"
+#include "crowd_grid.h"
 #include "miniz.h"
 
 #pragma comment(lib, "advapi32.lib")
@@ -26,6 +29,114 @@
 namespace fs = std::filesystem;
 
 static HANDLE worker_thread = nullptr;
+static fs::path bridgeDebugPath;
+static std::atomic<uint64_t> boundaryCalls{0},boundaryOverrides{0};
+static void bridgeDebug(const char* format,...) {
+    if(bridgeDebugPath.empty()) return;
+    char line[768];va_list args;va_start(args,format);
+    int count=vsnprintf_s(line,sizeof(line)-2,_TRUNCATE,format,args);va_end(args);
+    if(count<0) count=static_cast<int>(std::strlen(line));
+    line[count++]='\r';line[count++]='\n';
+    HANDLE f=CreateFileW(bridgeDebugPath.c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+        nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(f==INVALID_HANDLE_VALUE) return;
+    DWORD written;WriteFile(f,line,count,&written,nullptr);CloseHandle(f);
+}
+
+// ---------------------------------------------------------------------------
+// Park Boundary Expansion Hook (IsPositionWithinParkBoundary)
+// RVA: 0xdf4430 in PlanetCoaster2.exe (PC2 1.11.3.986758)
+// ---------------------------------------------------------------------------
+
+typedef bool (__fastcall *IsPositionWithinParkBoundary_t)(void* rcx, const float* pos, bool r8b);
+static IsPositionWithinParkBoundary_t original_IsPositionWithinParkBoundary = nullptr;
+static std::atomic<float> g_expanded_half_size{ 2050.0f };
+static bool g_boundary_hook_installed = false;
+
+static bool __fastcall Hooked_IsPositionWithinParkBoundary(void* rcx, const float* pos, bool r8b) {
+    const auto calls=boundaryCalls.fetch_add(1,std::memory_order_relaxed)+1;
+    bool original=original_IsPositionWithinParkBoundary && original_IsPositionWithinParkBoundary(rcx,pos,r8b);
+    bool expanded=false;
+    if (pos) {
+        float x = pos[0];
+        float y = pos[1];
+        float z = pos[2];
+        float half = g_expanded_half_size.load(std::memory_order_relaxed);
+        if (x >= -half && x <= half && z >= -half && z <= half && y >= -2304.0f && y <= 2304.0f) {
+            expanded=true;
+        }
+    }
+    if(!original && expanded) boundaryOverrides.fetch_add(1,std::memory_order_relaxed);
+    if(calls<=8 || (calls&(calls-1))==0) bridgeDebug(
+        "boundary call=%llu original=%d expanded=%d position=(%.2f,%.2f,%.2f) caller=%p",
+        static_cast<unsigned long long>(calls),original,expanded,pos?pos[0]:0,pos?pos[1]:0,pos?pos[2]:0,_ReturnAddress());
+    return original || expanded;
+}
+
+static bool installBoundaryHook(unsigned char* base, size_t size, std::string& error) {
+    if (g_boundary_hook_installed) return true;
+    const uint32_t rva = 0xdf4430;
+    if (rva + 16 > size) {
+        error = "Boundary hook RVA out of range.";
+        return false;
+    }
+    unsigned char* target = base + rva;
+    static const uint8_t expected[16] = {
+        0x48, 0x8b, 0xc4, 0x53, 0x57, 0x48, 0x81, 0xec, 0x98, 0x00, 0x00, 0x00, 0x48, 0x89, 0x68, 0x10
+    };
+    if (std::memcmp(target, expected, 16) != 0) {
+        uint64_t destination=0;
+        std::memcpy(&destination,target+6,sizeof(destination));
+        if (target[0] == 0xFF && target[1] == 0x25 && destination==reinterpret_cast<uint64_t>(&Hooked_IsPositionWithinParkBoundary)) {
+            g_boundary_hook_installed = true;
+            return true;
+        }
+        error = "Boundary function signature mismatch or foreign hook.";
+        bridgeDebug("boundary hook rejected: rva=0x%x bytes=%02x %02x %02x %02x",rva,target[0],target[1],target[2],target[3]);
+        return false;
+    }
+
+    unsigned char* trampoline = static_cast<unsigned char*>(
+        VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+    );
+    if (!trampoline) {
+        error = "Failed to allocate memory for boundary trampoline.";
+        return false;
+    }
+
+    std::memcpy(trampoline, expected, 16);
+    uint8_t jmp_back[14] = { 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00 };
+    uint64_t ret_addr = reinterpret_cast<uint64_t>(target + 16);
+    std::memcpy(jmp_back + 6, &ret_addr, sizeof(ret_addr));
+    std::memcpy(trampoline + 16, jmp_back, 14);
+
+    original_IsPositionWithinParkBoundary = reinterpret_cast<IsPositionWithinParkBoundary_t>(trampoline);
+
+    DWORD old_protect = 0;
+    if (!VirtualProtect(target, 16, PAGE_EXECUTE_READWRITE, &old_protect)) {
+        VirtualFree(trampoline, 0, MEM_RELEASE);
+        original_IsPositionWithinParkBoundary = nullptr;
+        error = "Failed to modify page protection for boundary hook.";
+        return false;
+    }
+
+    uint8_t hook_patch[16] = { 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00 };
+    uint64_t hook_dest = reinterpret_cast<uint64_t>(&Hooked_IsPositionWithinParkBoundary);
+    std::memcpy(hook_patch + 6, &hook_dest, sizeof(hook_dest));
+    hook_patch[14] = 0x90;
+    hook_patch[15] = 0x90;
+
+    std::memcpy(target, hook_patch, 16);
+
+    DWORD ignored = 0;
+    VirtualProtect(target, 16, old_protect, &ignored);
+    FlushInstructionCache(GetCurrentProcess(), target, 16);
+    FlushInstructionCache(GetCurrentProcess(), trampoline, 30);
+
+    g_boundary_hook_installed = true;
+    bridgeDebug("boundary hook installed: rva=0x%x target=%p trampoline=%p",rva,target,trampoline);
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // File & Utility Helpers
@@ -1205,9 +1316,11 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
         if (!n || n == 32768) return 0;
         auto compatibility = fs::path(buffer).parent_path();
         auto mod = compatibility.parent_path();
+        if(bridgeDebugPath.empty()) bridgeDebugPath=mod/L"BridgeDebug.log";
         auto cache = mod / L"AutoConversion";
         fs::create_directories(cache);
         bool supported = supportedGame();
+        bridgeDebug("Begin: supported_game=%d",supported);
         atomicWrite(cache / L"BridgeInfo.lua", supported ?
             "return {version=32,supported=true}\n" :
             "return {version=32,supported=false,message=\"Automatic conversion does not support this game build. Original park unchanged.\"}\n");
@@ -1225,12 +1338,43 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
         if (!hyphen) return 0;
 
         status = cache / (L"State-" + wide(nonce) + L".lua");
+        bridgeDebug("request=%s profile=%s",identifier,biome);
 
         if (std::strcmp(identifier, "__initialize_sea__") == 0) {
             std::string error;
-            if (configureSeaRaster(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)), 0x130a4000, error))
-                atomicWrite(status, "return {status=\"sea_ready\",seaRaster=4096}\n");
-            else atomicWrite(status, "return {status=\"error\",message=\"" + error + "\"}\n");
+            bool ok_sea = configureSeaRaster(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)), 0x130a4000, error);
+            std::string nav_error;
+            bool ok_nav=configureNavigationBounds(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)),0x130a4000,nav_error);
+            bridgeDebug("navigation startup: ready=%d min=-2048 max=2048 error=%s",ok_nav,nav_error.c_str());
+            std::string crowd_error;
+            bool ok_crowd=configureCrowdGrid(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)),0x130a4000,crowd_error);
+            bridgeDebug("crowd grid startup: ready=%d size=%d error=%s",ok_crowd,ok_crowd?4096:1024,crowd_error.c_str());
+            std::string hook_err;
+            bool ok_hook = installBoundaryHook(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)), 0x130a4000, hook_err);
+            // A navigation-only failure leaves the original navigable area.
+            // Do not abort a safe terrain load before CPTWorld can initialize.
+            if (ok_sea && ok_hook)
+                atomicWrite(status, "return {status=\"sea_ready\",seaRaster=4096,boundaryHook=true,navigationHalfSize="+
+                    std::string(ok_nav?"2048":"512")+",navigationError="+(ok_nav?"nil":"\""+nav_error+"\"")+
+                    ",crowdGridSize="+(ok_crowd?"4096":"1024")+",crowdGridError="+(ok_crowd?"nil":"\""+crowd_error+"\"")+"}\n");
+            else atomicWrite(status, "return {status=\"error\",message=\"" + error + "; " + hook_err + "; " + nav_error + "\"}\n");
+            return 0;
+        }
+
+        if(std::strcmp(identifier,"__boundary_diagnostics__")==0) {
+            atomicWrite(status,"return {status=\"ok\",calls="+std::to_string(boundaryCalls.load())+
+                ",overrides="+std::to_string(boundaryOverrides.load())+",installed="+(g_boundary_hook_installed?"true":"false")+"}\n");
+            return 0;
+        }
+
+        if (std::strcmp(identifier, "__set_boundary_size__") == 0) {
+            try {
+                float size_val = std::stof(biome);
+                if (size_val > 100.0f) {
+                    g_expanded_half_size.store(size_val * 0.5f + 10.0f, std::memory_order_relaxed);
+                }
+            } catch (...) {}
+            atomicWrite(status, "return {status=\"ok\"}\n");
             return 0;
         }
 
@@ -1262,6 +1406,36 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
 }
 
 #ifdef BRIDGE_TEST
+static uintptr_t testNativeFault=0;
+static LONG recordTestNativeFault(EXCEPTION_POINTERS* info) {
+    testNativeFault=reinterpret_cast<uintptr_t>(info->ExceptionRecord->ExceptionAddress);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+extern "C" __declspec(dllexport) uintptr_t TestNativeFaultAddress() {return testNativeFault;}
+extern "C" __declspec(dllexport) int TestCrowdInitialize(void* function,void* grid,const float* origin,const float* extent,const float* scale) {
+    __try {
+        using Initialize=void*(*)(void*,const float*,const float*,const float*,const float*);
+        reinterpret_cast<Initialize>(function)(grid,origin,extent,extent,scale);
+        return 1;
+    } __except(recordTestNativeFault(GetExceptionInformation())) {return 0;}
+}
+extern "C" __declspec(dllexport) int TestCrowdGrid(void* image,size_t length) {
+    std::string error;
+    return configureCrowdGrid(static_cast<unsigned char*>(image),length,error)?1:0;
+}
+extern "C" __declspec(dllexport) int TestNavigationBackwardAllocation() {
+    SYSTEM_INFO system{};GetSystemInfo(&system);
+    auto anchor=reinterpret_cast<unsigned char*>(system.lpMaximumApplicationAddress);
+    auto memory=allocateNavigationConstants(anchor);
+    if(!memory) return 0;
+    bool below=memory<anchor && reinterpret_cast<uintptr_t>(anchor)-reinterpret_cast<uintptr_t>(memory)<0x80000000;
+    VirtualFree(memory,0,MEM_RELEASE);
+    return below?1:0;
+}
+extern "C" __declspec(dllexport) int TestNavigationBounds(void* image,size_t length) {
+    std::string error;
+    return configureNavigationBounds(static_cast<unsigned char*>(image),length,error)?1:0;
+}
 extern "C" __declspec(dllexport) int TestSeaRaster(void* image, size_t length) {
     std::string error;
     return configureSeaRaster(static_cast<unsigned char*>(image), length, error) ? 1 : 0;
@@ -1270,6 +1444,10 @@ extern "C" __declspec(dllexport) int TestArgumentContract(void* state) {
     char value[4096];
     for (int index = 1; index <= 4; ++index) if (!readArgument(state, index, value, sizeof(value))) return 0;
     return 1;
+}
+extern "C" __declspec(dllexport) int TestBoundaryHook(void* image, size_t length) {
+    std::string error;
+    return installBoundaryHook(static_cast<unsigned char*>(image), length, error) ? 1 : 0;
 }
 int main() {
     unsigned char state[64]{}, ci[32]{}, stack[24 * 5]{}, text[600]{};
@@ -1288,7 +1466,15 @@ int main() {
     assert(!readArgument(nullptr, 1, out, sizeof(out)));
     assert(!readArgument(reinterpret_cast<void*>(1), 1, out, sizeof(out)));
     assert(!supportedGame());
-    std::puts("PASS native argument reader, invalid pointers, string bounds, and build guard");
+
+    // Test Hooked_IsPositionWithinParkBoundary logic directly
+    g_expanded_half_size.store(1020.0f);
+    float test_pos_inside[3] = { 600.0f, 20.0f, -700.0f };
+    assert(Hooked_IsPositionWithinParkBoundary(nullptr, test_pos_inside, false) == true);
+    float test_pos_outside[3] = { 1500.0f, 20.0f, 0.0f };
+    assert(Hooked_IsPositionWithinParkBoundary(nullptr, test_pos_outside, false) == false);
+
+    std::puts("PASS native argument reader, invalid pointers, string bounds, and boundary hook logic");
     return 0;
 }
 #endif

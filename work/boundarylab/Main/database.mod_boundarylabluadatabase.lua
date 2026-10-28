@@ -1,4 +1,4 @@
--- Park Expansions 0.53: extends copied voxel storage; original terrain is retained.
+-- Park Expansions 0.56: extends copied voxel storage; original terrain is retained.
 local g = _G
 local api = g.api
 local M = {}
@@ -146,7 +146,7 @@ end
 
 local function notice(message)
     log(message)
-    local report = "Park Expansions 0.53 report\n" .. g.table.concat(reportLines,"\n")
+    local report = "Park Expansions 0.56 report\n" .. g.table.concat(reportLines,"\n")
     local copied,result = g.pcall(function()
         return api.world.GetWorldAPIs().editors:CopyToClipboard(report)
     end)
@@ -154,7 +154,7 @@ local function notice(message)
         and "\n\nReport copied to clipboard. Paste it in chat with Ctrl+V."
         or "\n\nClipboard unavailable. Short result: " .. g.tostring(M.lastCode or "BL22-ERROR")
     g.require("Helpers.PopUpDialogUtils").RunOKDialog(
-        "[STRING_LITERAL:Value=|Park Expansions 0.53|]",
+        "[STRING_LITERAL:Value=|Park Expansions 0.56|]",
         "[STRING_LITERAL:Value=|" .. message .. hint .. "|]")
 end
 
@@ -230,7 +230,7 @@ end
 local function expand(self,requestedWidth,allowShrink)
     reportLines = {}
     M.lastCode = "BL22-ERROR"
-    log("RUN Park Expansions 0.53")
+    log("RUN Park Expansions 0.56")
     for _,line in g.ipairs(self.boundaryLabLoadLines or {}) do log(line) end
     local cfg = {}
     local chunk, err = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Config.ini", "t", cfg)
@@ -663,6 +663,18 @@ local function expand(self,requestedWidth,allowShrink)
         bounds={-rectangleHalf,rectangleHalf,-rectangleHalf,rectangleHalf}}
     self.boundaryLabPreview = nil
     api.undo.Checkpoint({})
+    if w.park then
+        if g.type(w.park.UnlockAllPlots)=="function" then g.pcall(w.park.UnlockAllPlots,w.park,true) end
+        if g.type(w.park.ClearAllPlotRestrictions)=="function" then g.pcall(w.park.ClearAllPlotRestrictions,w.park) end
+        if g.type(w.park.ClearEnforcedPlacementArea)=="function" then g.pcall(w.park.ClearEnforcedPlacementArea,w.park) end
+    end
+    if w.crowdsimulation and g.type(w.crowdsimulation.SetVoxelTerrain)=="function" then
+        local tid = w.voxelterrain and w.voxelterrain:GetPrimaryVoxelTerrainEntityID()
+        if tid then g.pcall(w.crowdsimulation.SetVoxelTerrain,tid) end
+    end
+    if g.type(Research.SyncBoundarySize)=="function" then
+        Research.SyncBoundarySize(rectangleHalf * 2)
+    end
     Research.Progress(self,96,"Updating park area…")
     for _ = 1,120 do g.coroutine.yield() end
     local gained,beforeInside,afterInside = 0,0,0
@@ -682,7 +694,7 @@ local function expand(self,requestedWidth,allowShrink)
     end
     M.lastCode = "BL22-COMMIT-OK"
     Research.Progress(self,100,"Park expanded.")
-    self.boundaryLabReport="Park Expansions 0.53 report\n"..g.table.concat(reportLines,"\n")
+    self.boundaryLabReport="Park Expansions 0.56 report\n"..g.table.concat(reportLines,"\n")
     if requestedWidth then return end
     notice((cfg.Shape == "rectangle" and "COMMIT COMPLETE - rectangle " .. rectangleHalf*2 .. " x " .. rectangleHalf*2 .. " m"
         or "COMMIT COMPLETE - contour scaled by " .. cfg.Factor)
@@ -717,6 +729,16 @@ function M.AddLuaHooks(add)
         local activate=module.OnActivate
         module.OnActivate=function(self,...)
             local result=activate(self,...)
+            local w=api.world.GetWorldAPIs()
+            if w and w.park then
+                if g.type(w.park.UnlockAllPlots)=="function" then g.pcall(w.park.UnlockAllPlots,w.park,true) end
+                if g.type(w.park.ClearAllPlotRestrictions)=="function" then g.pcall(w.park.ClearAllPlotRestrictions,w.park) end
+                if g.type(w.park.ClearEnforcedPlacementArea)=="function" then g.pcall(w.park.ClearEnforcedPlacementArea,w.park) end
+            end
+            if w and w.crowdsimulation and g.type(w.crowdsimulation.SetVoxelTerrain)=="function" then
+                local tid = w.voxelterrain and w.voxelterrain:GetPrimaryVoxelTerrainEntityID()
+                if tid then g.pcall(w.crowdsimulation.SetVoxelTerrain,tid) end
+            end
             Scenery.Queue(self)
             return result
         end
@@ -771,5 +793,5 @@ function M.AddLuaHooks(add)
     end)
 end
 
-log("DATABASE LOADED - Park Expansions 0.53 experimental expansion")
+log("DATABASE LOADED - Park Expansions 0.56 experimental expansion")
 return M

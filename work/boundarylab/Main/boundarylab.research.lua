@@ -19,11 +19,26 @@ function R.InitializeNative()
         if g.type(status)~="table" or status.status~="sea_ready" or status.seaRaster~=4096 then
             g.error(g.type(status)=="table" and status.message or "Sea raster response did not validate.")
         end
+        nativeSea.navigationHalfSize=status.navigationHalfSize
+        nativeSea.navigationError=status.navigationError
+        nativeSea.crowdGridSize=status.crowdGridSize
+        nativeSea.crowdGridError=status.crowdGridError
+        nativeSea.boundaryHook=status.boundaryHook
         return true
     end)
     nativeSea.ready=ok and result==true
     nativeSea.error=not nativeSea.ready and g.tostring(result) or nil
     return nativeSea.ready
+end
+function R.SyncBoundarySize(size)
+    if not nativeSea.ready then return end
+    g.pcall(function()
+        local begin=g.package.loadlib("Win64/ovldata/Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll","Begin")
+        if g.type(begin)=="function" then
+            local nonce=g.tostring(g.math.random(1,1000000000)).."-"..g.tostring(g.math.random(1,1000000000))
+            begin("__set_boundary_size__","Boundary size sync",g.tostring(size or 2048),nonce)
+        end
+    end)
 end
 function R.MapFolder(world)
     return world.parkExpansionsTerrainSize==4096 and "Maps4096" or "Maps"
@@ -100,6 +115,7 @@ function R.LoadConfig(world)
             if values.ResearchEnabled==false and (values.ManualParkSize>2048 or values.ManualMaxHeight>2048) then
                 values.warning="Values above 2048 may be unstable. Terrain and engine limits can still prevent placement."
             end
+            if values.ManualParkSize then R.SyncBoundarySize(values.ManualParkSize) end
         end)
     end
     if not ok then values={ResearchEnabled=true,Enable4KMap=false,MaxMapSize=2048,CameraZoomMultiplier=2.0,error="Config error: "..g.tostring(message)} end
@@ -646,6 +662,16 @@ function R.AfterLoad(world,templates)
         world.boundaryLabActiveSeed=s.seed
         world.boundaryLabExpectedBounds=s.bounds
         contours(world,world.boundaryLabTemplate)
+        local w=api.world.GetWorldAPIs()
+        if w and w.park then
+            if g.type(w.park.UnlockAllPlots)=="function" then g.pcall(w.park.UnlockAllPlots,w.park,true) end
+            if g.type(w.park.ClearAllPlotRestrictions)=="function" then g.pcall(w.park.ClearAllPlotRestrictions,w.park) end
+            if g.type(w.park.ClearEnforcedPlacementArea)=="function" then g.pcall(w.park.ClearEnforcedPlacementArea,w.park) end
+        end
+        if w and w.crowdsimulation and g.type(w.crowdsimulation.SetVoxelTerrain)=="function" then
+            local tid = w.voxelterrain and w.voxelterrain:GetPrimaryVoxelTerrainEntityID()
+            if tid then g.pcall(w.crowdsimulation.SetVoxelTerrain,tid) end
+        end
         if settings(world).ResearchEnabled==false then
             R.QueueManual(world)
         else
@@ -750,15 +776,31 @@ end
 function R.Report()
     if not current or current.parkExpansionsParkReady~=true then return end
     local s=state(current)
+    local countersOK,counters=g.pcall(function()
+        local begin=g.package.loadlib("Win64/ovldata/Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll","Begin")
+        if g.type(begin)~="function" then return {} end
+        local nonce=g.tostring(g.math.random(1,1000000000)).."-"..g.tostring(g.math.random(1,1000000000))
+        begin("__boundary_diagnostics__","Boundary diagnostics","read",nonce)
+        local chunk=g.loadfile("Win64/ovldata/Mod_BoundaryLab/AutoConversion/State-"..nonce..".lua","t",{})
+        return chunk and chunk() or {}
+    end)
+    if not countersOK or g.type(counters)~="table" then counters={} end
     local terrainOK,terrainBounds=g.pcall(function()
         local terrain=api.world.GetWorldAPIs().voxelterrain
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.53 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.56 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_SIZE="..g.tostring(current.parkExpansionsTerrainSize or 2048)
         .."\nSEA_RASTER="..g.tostring(nativeSea.ready and 4096 or "unavailable")
         .."\nSEA_RASTER_ERROR="..g.tostring(nativeSea.error)
+        .."\nNAVIGATION_INITIALIZER_HALF_SIZE="..g.tostring(nativeSea.navigationHalfSize)
+        .."\nNAVIGATION_SETUP_ERROR="..g.tostring(nativeSea.navigationError)
+        .."\nCROWD_GRID_SIZE="..g.tostring(nativeSea.crowdGridSize)
+        .."\nCROWD_GRID_ERROR="..g.tostring(nativeSea.crowdGridError)
+        .."\nBOUNDARY_HOOK="..g.tostring(nativeSea.boundaryHook)
+        .."\nBOUNDARY_HOOK_CALLS="..g.tostring(counters.calls)
+        .."\nBOUNDARY_HOOK_OVERRIDES="..g.tostring(counters.overrides)
         .."\nENV_CAPTURE_SPAN="..g.tostring(current.parkExpansionsCaptureSpan)
         .."\nENV_CAPTURE_RADIUS="..g.tostring(current.parkExpansionsCaptureRadius)
         .."\nENV_CAPTURE_POINTS="..g.tostring(current.parkExpansionsCaptureCount)

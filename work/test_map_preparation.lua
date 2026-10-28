@@ -19,7 +19,7 @@ local function test(kind)
  loadfile=function(path,mode,env)
   assert(mode=="t" and type(env)=="table")
   if path:find("BridgeInfo",1,true)then return function()return{version=32,supported=true}end end
-  if path:find("State-",1,true)then return function()return nativeRequest and {status="sea_ready",seaRaster=4096} or {status="working"}end end
+  if path:find("State-",1,true)then return function()return nativeRequest and {status="sea_ready",seaRaster=4096,navigationHalfSize=2048} or {status="working"}end end
   if path:find("Progress-",1,true)then return function()return{status="working",progress=37,message="Reading terrain"}end end
   if path:find("Result-",1,true)then
    if yields==0 then return nil end

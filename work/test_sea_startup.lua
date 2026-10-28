@@ -1,5 +1,5 @@
 local originalLoadfile,originalLoadlib=loadfile,package.loadlib
-for _,kind in ipairs({"ready","unsupported","old-dll","missing","invalid"}) do
+for _,kind in ipairs({"ready","navigation-failed","unsupported","old-dll","missing","invalid"}) do
     api={save={}}
     local R=assert(originalLoadfile('work/boundarylab/Main/boundarylab.research.lua'))()
     local calls=0
@@ -16,15 +16,17 @@ for _,kind in ipairs({"ready","unsupported","old-dll","missing","invalid"}) do
         assert(path:find("State-",1,true) and mode=="t" and type(env)=="table")
         if kind=="old-dll" then return nil end
         return function()
-            if kind=="ready" then return {status="sea_ready",seaRaster=4096} end
+            if kind=="ready" then return {status="sea_ready",seaRaster=4096,navigationHalfSize=2048} end
+            if kind=="navigation-failed" then return {status="sea_ready",seaRaster=4096,navigationHalfSize=512,navigationError="Allocation unavailable"} end
             if kind=="invalid" then return {status="sea_ready",seaRaster=2048} end
             return {status="error",message="Sea code differs from the supported game build."}
         end
     end
-    assert(R.InitializeNative()==(kind=="ready"))
-    assert(R.NativeSeaReady()==(kind=="ready"))
-    assert(R.InitializeNative()==(kind=="ready") and calls==(kind=="missing" and 0 or 1))
-    if kind~="ready" then
+    local ready=kind=="ready" or kind=="navigation-failed"
+    assert(R.InitializeNative()==ready)
+    assert(R.NativeSeaReady()==ready)
+    assert(R.InitializeNative()==ready and calls==(kind=="missing" and 0 or 1))
+    if not ready then
         -- A broken startup must not fall through into 4K generation/native loading.
         package.loadlib=function()error("Must not launch a worker after failed native initialization")end
         R.LoadingProgress=function()end
