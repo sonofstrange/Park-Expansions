@@ -1426,6 +1426,70 @@ static bool backup_save_file(const std::string& save_id, const std::string& park
     return false;
 }
 
+static std::vector<uint8_t> extract_park2_entry(const std::vector<uint8_t>& file_bytes, const std::string& target_name) {
+    if (file_bytes.size() < 22) return {};
+
+    size_t eocd_pos = SIZE_MAX;
+    size_t max_search = (file_bytes.size() > 65557) ? 65557 : file_bytes.size();
+    for (size_t i = file_bytes.size() - 22; i >= file_bytes.size() - max_search; --i) {
+        if (file_bytes[i] == 0x50 && file_bytes[i+1] == 0x4b && file_bytes[i+2] == 0x05 && file_bytes[i+3] == 0x06) {
+            eocd_pos = i;
+            break;
+        }
+        if (i == 0) break;
+    }
+
+    if (eocd_pos != SIZE_MAX) {
+        uint32_t cdir_ofs = 0;
+        std::memcpy(&cdir_ofs, &file_bytes[eocd_pos + 16], 4);
+        size_t pos = cdir_ofs;
+        while (pos + 46 <= file_bytes.size() &&
+               file_bytes[pos] == 0x50 && file_bytes[pos+1] == 0x4b &&
+               file_bytes[pos+2] == 0x01 && file_bytes[pos+3] == 0x02) {
+            uint16_t method = 0;
+            std::memcpy(&method, &file_bytes[pos + 10], 2);
+            uint32_t comp_size = 0, uncomp_size = 0;
+            std::memcpy(&comp_size, &file_bytes[pos + 20], 4);
+            std::memcpy(&uncomp_size, &file_bytes[pos + 24], 4);
+            uint16_t fname_len = 0, extra_len = 0, comm_len = 0;
+            std::memcpy(&fname_len, &file_bytes[pos + 28], 2);
+            std::memcpy(&extra_len, &file_bytes[pos + 30], 2);
+            std::memcpy(&comm_len, &file_bytes[pos + 32], 2);
+            uint32_t local_off = 0;
+            std::memcpy(&local_off, &file_bytes[pos + 42], 4);
+
+            if (pos + 46 + fname_len <= file_bytes.size()) {
+                std::string fname(reinterpret_cast<const char*>(&file_bytes[pos + 46]), fname_len);
+                if (fname == target_name) {
+                    if (local_off + 30 <= file_bytes.size() &&
+                        file_bytes[local_off] == 0x50 && file_bytes[local_off+1] == 0x4b &&
+                        file_bytes[local_off+2] == 0x03 && file_bytes[local_off+3] == 0x04) {
+                        uint16_t loc_fname_len = 0, loc_extra_len = 0;
+                        std::memcpy(&loc_fname_len, &file_bytes[local_off + 26], 2);
+                        std::memcpy(&loc_extra_len, &file_bytes[local_off + 28], 2);
+                        size_t data_start = local_off + 30 + loc_fname_len + loc_extra_len;
+                        if (data_start + comp_size <= file_bytes.size()) {
+                            if (method == 0) {
+                                return std::vector<uint8_t>(file_bytes.begin() + data_start, file_bytes.begin() + data_start + comp_size);
+                            } else if (method == 8) {
+                                std::vector<uint8_t> out(uncomp_size);
+                                size_t res = tinfl_decompress_mem_to_mem(out.data(), uncomp_size, &file_bytes[data_start], comp_size, 0);
+                                if (res != TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) {
+                                    out.resize(res);
+                                    return out;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            pos += 46 + fname_len + extra_len + comm_len;
+        }
+    }
+
+    return {};
+}
+
 static void convert_save(const fs::path& mod_dir, const std::string& identifier,
                          const std::string& park_name, const std::string& biome_arg,
                          const std::string& nonce) {
@@ -1522,37 +1586,64 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
             return;
         }
 
+        // Frontier .park2 saves write cd_size=0 in EOCD. Patch it in memory so standard zip readers parse the central directory.
+        if (file_bytes.size() >= 22) {
+            size_t max_search = (file_bytes.size() > 65557) ? 65557 : file_bytes.size();
+            for (size_t i = file_bytes.size() - 22; i >= file_bytes.size() - max_search; --i) {
+                if (file_bytes[i] == 0x50 && file_bytes[i+1] == 0x4b && file_bytes[i+2] == 0x05 && file_bytes[i+3] == 0x06) {
+                    uint32_t cdir_size = 0, cdir_ofs = 0;
+                    std::memcpy(&cdir_size, &file_bytes[i + 12], 4);
+                    std::memcpy(&cdir_ofs, &file_bytes[i + 16], 4);
+                    if (cdir_size == 0 && cdir_ofs < i) {
+                        uint32_t real_cdir_size = static_cast<uint32_t>(i - cdir_ofs);
+                        std::memcpy(&file_bytes[i + 12], &real_cdir_size, sizeof(real_cdir_size));
+                    }
+                    break;
+                }
+                if (i == 0) break;
+            }
+        }
+
+        std::vector<uint8_t> meta_bytes;
+        std::vector<uint8_t> park_bytes;
+
         mz_zip_archive zip{};
         std::memset(&zip, 0, sizeof(zip));
-        if (!mz_zip_reader_init_mem(&zip, file_bytes.data(), file_bytes.size(), 0)) {
+        if (mz_zip_reader_init_mem(&zip, file_bytes.data(), file_bytes.size(), 0)) {
+            size_t meta_len = 0;
+            void* meta_ptr = mz_zip_reader_extract_file_to_heap(&zip, "metadata", &meta_len, 0);
+            if (meta_ptr) {
+                meta_bytes.assign(static_cast<const uint8_t*>(meta_ptr), static_cast<const uint8_t*>(meta_ptr) + meta_len);
+                mz_free(meta_ptr);
+            }
+            size_t park_len = 0;
+            void* park_ptr = mz_zip_reader_extract_file_to_heap(&zip, "parkdata", &park_len, 0);
+            if (park_ptr) {
+                park_bytes.assign(static_cast<const uint8_t*>(park_ptr), static_cast<const uint8_t*>(park_ptr) + park_len);
+                mz_free(park_ptr);
+            }
+            mz_zip_reader_end(&zip);
+        }
+
+        if (meta_bytes.empty()) meta_bytes = extract_park2_entry(file_bytes, "metadata");
+        if (park_bytes.empty()) park_bytes = extract_park2_entry(file_bytes, "parkdata");
+
+        if (park_bytes.empty()) {
             fail("Could not read park archive. Original park unchanged.");
             return;
         }
 
-        size_t meta_len = 0;
-        void* meta_ptr = mz_zip_reader_extract_file_to_heap(&zip, "metadata", &meta_len, 0);
-        if (meta_ptr) {
-            std::string meta_str(static_cast<const char*>(meta_ptr), meta_len);
-            mz_free(meta_ptr);
+        if (!meta_bytes.empty()) {
+            std::string meta_str(meta_bytes.begin(), meta_bytes.end());
             if (meta_str.find("parkExpansions") != std::string::npos) {
-                mz_zip_reader_end(&zip);
                 skip("Existing Park Expansions world data retained.");
                 return;
             }
         }
 
-        size_t park_len = 0;
-        void* park_ptr = mz_zip_reader_extract_file_to_heap(&zip, "parkdata", &park_len, 0);
-        mz_zip_reader_end(&zip);
-        if (!park_ptr || park_len < 32) {
-            if (park_ptr) mz_free(park_ptr);
-            fail("Missing native park data. Original park unchanged.");
-            return;
-        }
-
-        const uint8_t* u8 = static_cast<const uint8_t*>(park_ptr);
-        if (u8[0] != 0xff || u8[1] != 0x00 || u8[2] != 0xfe || u8[3] != 0x01) {
-            mz_free(park_ptr);
+        const uint8_t* u8 = park_bytes.data();
+        size_t park_len = park_bytes.size();
+        if (park_len < 32 || u8[0] != 0xff || u8[1] != 0x00 || u8[2] != 0xfe || u8[3] != 0x01) {
             fail("Unknown native data envelope. Original park unchanged.");
             return;
         }
@@ -1561,13 +1652,11 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
 
         const char b_search[] = "BoundaryLabResearch";
         if (std::search(body_ptr, body_ptr + body_len, b_search, b_search + 19) != body_ptr + body_len) {
-            mz_free(park_ptr);
             skip("Existing Park Expansions world data retained.");
             return;
         }
 
         std::vector<uint8_t> body_vec(body_ptr, body_ptr + body_len);
-        mz_free(park_ptr);
 
         progress(25, "Checking terrain storage and park boundaries");
         auto info = parse_clients(body_vec);
@@ -1866,6 +1955,19 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
     }
     return 0;
 }
+
+#ifdef CONVERT_CLI
+int main(int argc, char** argv) {
+    if (argc < 6) {
+        std::cout << "Usage: convert_cli <mod_dir> <id> <name> <biome> <nonce>\n";
+        return 1;
+    }
+    std::cout << "Starting convert_save...\n";
+    convert_save(argv[1], argv[2], argv[3], argv[4], argv[5]);
+    std::cout << "Finished convert_save.\n";
+    return 0;
+}
+#endif
 
 #ifdef BRIDGE_TEST
 static uintptr_t testNativeFault=0;
