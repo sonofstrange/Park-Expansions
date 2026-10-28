@@ -18,7 +18,7 @@ Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open
 
 ## Compatibility
 
-Release version **0.56**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. The native bridge is gated to game build **1.11.3.986758F**. Existing-save support is experimental; older conversion paths are not comprehensively validated in this release. Career, Franchise and Workshop-only saves are not supported by the converter.
+Release version **0.57**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. The native bridge is gated to game build **1.11.3.986758F**. Existing-save support is experimental; older conversion paths are not comprehensively validated in this release. Career, Franchise and Workshop-only saves are not supported by the converter.
 
 The maximum buildable width is 2040 m on standard 2K maps and 4088 m on 4K maps, leaving a 4 m safety margin at each terrain edge.
 
@@ -41,7 +41,7 @@ Each branch costs 12,500 / 25,000 / 50,000 / 100,000 / 200,000 research points. 
 
 ## Experimental
 
-**Known issue in 0.56:** guests can cross the original map boundary, but pathfinding in expanded areas may still be unreliable. Further investigation is ongoing.
+**Known issue in 0.57:** guests can cross the original map boundary, but pathfinding in expanded areas may still be unreliable. Further investigation is ongoing.
 
 Back up your saves before use. Bugs, crashes, visual glitches and save compatibility issues are possible. Some changes may persist after removing the mod. Loading expanded saves without the mod has not been verified.
 

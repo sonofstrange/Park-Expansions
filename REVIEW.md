@@ -1,6 +1,6 @@
 # Compiled component and Nexus review
 
-This document describes the **0.56** source and distribution. It is not an antivirus certification.
+This document describes the **0.57** source and distribution. It is not an antivirus certification.
 
 ## Archive contents
 

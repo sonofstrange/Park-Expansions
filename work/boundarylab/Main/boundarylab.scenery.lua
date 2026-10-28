@@ -298,7 +298,6 @@ function S.AfterLoad(world,progress)
             state.nextIndex=cursor;state.count=last;state.source=data.source
             wait(function()return api.undo.IsOperationComplete(committed)end,"Scenery commit timed out")
             wait(function()return not api.undo.IsBusy()end,"Scenery commit stayed busy")
-            api.undo.Checkpoint({})
             progress(true,g.math.floor(last*100/g.math.max(count,1)),"Restoring scenery: "..last.."/"..count)
             -- Give the native preview manager a full Advance between transactions.
             g.coroutine.yield()
@@ -316,6 +315,20 @@ function S.AfterLoad(world,progress)
     world.parkExpansionsSceneryPreview=nil
     if changedConstraints then w.park:ActivateParkEditConstraints() end
     world.parkExpansionsSceneryConstraints=nil
+    if w then
+        if w.scenery_editconstraint and g.type(w.scenery_editconstraint.ClearEditConstraintsForAllParts)=="function" then
+            g.pcall(w.scenery_editconstraint.ClearEditConstraintsForAllParts,w.scenery_editconstraint)
+        end
+        if w.rides and g.type(w.rides.SetAllRidesEditable)=="function" then
+            g.pcall(w.rides.SetAllRidesEditable,w.rides,true)
+        end
+        if api.track and g.type(api.track.ClearAllTrackEditConstraints)=="function" then
+            g.pcall(api.track.ClearAllTrackEditConstraints)
+        end
+        if w.flumes and g.type(w.flumes.SetAllPlatformsEditable)=="function" then
+            g.pcall(w.flumes.SetAllPlatformsEditable,w.flumes,true)
+        end
+    end
     if saveControl then saveControl:ResumeSave() end
     world.parkExpansionsScenerySaveControl=nil
     if not ok then

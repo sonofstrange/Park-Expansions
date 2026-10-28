@@ -1,4 +1,4 @@
--- Park Expansions 0.56: extends copied voxel storage; original terrain is retained.
+-- Park Expansions 0.57: extends copied voxel storage; original terrain is retained.
 local g = _G
 local api = g.api
 local M = {}
@@ -82,25 +82,57 @@ local function probe(world)
     -- Keep known contour seeds so Undo/Redo cannot strand later research.
     local candidates=world.boundaryLabContourCandidates or {{seed=seedPosition,
         bounds=world.boundaryLabExpectedBounds or world.boundaryLabTemplate.bounds}}
-    for _,candidate in g.ipairs(candidates) do
-        edit.vRayStart=Vector3:new(candidate.seed[1],rayTop,candidate.seed[3])
-        edit.vPlacePoint=Vector3:new(candidate.seed[1],candidate.seed[2],candidate.seed[3])
-    local ok3, hit, panel, post, prop = g.pcall(function()
-        return w.boundary:GetBoundaryPartsFromNearRay(edit, 20, rayDepth)
-    end)
-    log("ray=" .. g.tostring(ok3) .. " hit=" .. g.tostring(hit)
-        .. " panel=" .. g.tostring(panel) .. " post=" .. g.tostring(post))
-    if ok3 and hit and (post or panel) then
-        local seed = post or panel
-        log("seed=" .. dump(seed:GetAllData(), 2))
-        local selection = w.boundary:GetAllConnectedBoundaryObjects(seed)
-        local nPosts, nPanels = 0, 0
-        for _ in g.pairs(selection.tControlPosts or {}) do nPosts = nPosts + 1 end
-        for _ in g.pairs(selection.tPanels or {}) do nPanels = nPanels + 1 end
-        log("CONNECTED posts=" .. nPosts .. " panels=" .. nPanels)
-        world.boundaryLabProbeBounds=candidate.bounds
-        return selection
+    if world.boundaryLabTemplate and world.boundaryLabTemplate.seed then
+        local foundTemplate = false
+        for _,c in g.ipairs(candidates) do
+            if c.seed and c.seed[1]==world.boundaryLabTemplate.seed[1] and c.seed[3]==world.boundaryLabTemplate.seed[3] then
+                foundTemplate = true
+                break
+            end
+        end
+        if not foundTemplate then
+            candidates[#candidates+1] = {seed=world.boundaryLabTemplate.seed, bounds=world.boundaryLabTemplate.bounds}
+        end
     end
+    for _,candidate in g.ipairs(candidates) do
+        if candidate and candidate.seed then
+            edit.vRayStart=Vector3:new(candidate.seed[1],rayTop,candidate.seed[3])
+            edit.vPlacePoint=Vector3:new(candidate.seed[1],candidate.seed[2],candidate.seed[3])
+            local ok3, hit, panel, post, prop = g.pcall(function()
+                return w.boundary:GetBoundaryPartsFromNearRay(edit, 20, rayDepth)
+            end)
+            log("ray=" .. g.tostring(ok3) .. " hit=" .. g.tostring(hit)
+                .. " panel=" .. g.tostring(panel) .. " post=" .. g.tostring(post))
+            if ok3 and hit and (post or panel) then
+                local seed = post or panel
+                local okData, seedData = g.pcall(function() return seed:GetAllData() end)
+                if okData and seedData then
+                    log("seed=" .. dump(seedData, 2))
+                    local okSel, selection = g.pcall(function() return w.boundary:GetAllConnectedBoundaryObjects(seed) end)
+                    if okSel and selection and selection.tControlPosts and selection.tPanels then
+                        local nPosts, nPanels = 0, 0
+                        local allValid = true
+                        for p in g.pairs(selection.tControlPosts) do
+                            local okP, pData = g.pcall(function() return p:GetAllData() end)
+                            if not okP or not pData or not pData.vPos then allValid = false; break end
+                            nPosts = nPosts + 1
+                        end
+                        if allValid and nPosts >= 4 then
+                            for pan in g.pairs(selection.tPanels) do
+                                local okPan, panData = g.pcall(function() return pan:GetAllData() end)
+                                if not okPan or not panData then allValid = false; break end
+                                nPanels = nPanels + 1
+                            end
+                        end
+                        if allValid and nPosts >= 4 and nPosts == nPanels then
+                            log("CONNECTED posts=" .. nPosts .. " panels=" .. nPanels)
+                            world.boundaryLabProbeBounds=candidate.bounds
+                            return selection
+                        end
+                    end
+                end
+            end
+        end
     end
     g.error("ParkBoundary contour not found; contour unchanged")
 end
@@ -146,7 +178,7 @@ end
 
 local function notice(message)
     log(message)
-    local report = "Park Expansions 0.56 report\n" .. g.table.concat(reportLines,"\n")
+    local report = "Park Expansions 0.57 report\n" .. g.table.concat(reportLines,"\n")
     local copied,result = g.pcall(function()
         return api.world.GetWorldAPIs().editors:CopyToClipboard(report)
     end)
@@ -154,7 +186,7 @@ local function notice(message)
         and "\n\nReport copied to clipboard. Paste it in chat with Ctrl+V."
         or "\n\nClipboard unavailable. Short result: " .. g.tostring(M.lastCode or "BL22-ERROR")
     g.require("Helpers.PopUpDialogUtils").RunOKDialog(
-        "[STRING_LITERAL:Value=|Park Expansions 0.56|]",
+        "[STRING_LITERAL:Value=|Park Expansions 0.57|]",
         "[STRING_LITERAL:Value=|" .. message .. hint .. "|]")
 end
 
@@ -230,7 +262,7 @@ end
 local function expand(self,requestedWidth,allowShrink)
     reportLines = {}
     M.lastCode = "BL22-ERROR"
-    log("RUN Park Expansions 0.56")
+    log("RUN Park Expansions 0.57")
     for _,line in g.ipairs(self.boundaryLabLoadLines or {}) do log(line) end
     local cfg = {}
     local chunk, err = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Config.ini", "t", cfg)
@@ -274,8 +306,30 @@ local function expand(self,requestedWidth,allowShrink)
     if cfg.Mode == "diagnose" then notice("DIAGNOSE COMPLETE - contour unchanged"); return end
     -- Refuse repeat expansion and maps that do not match the prototype's baseline.
     local expected = self.boundaryLabProbeBounds or self.boundaryLabExpectedBounds or self.boundaryLabTemplate.bounds
-    g.assert(g.math.abs(minX-expected[1]) < 0.2 and g.math.abs(maxX-expected[2]) < 0.2
-        and g.math.abs(minZ-expected[3]) < 0.2 and g.math.abs(maxZ-expected[4]) < 0.2,
+    local boundsMatch = g.math.abs(minX-expected[1]) < 0.2 and g.math.abs(maxX-expected[2]) < 0.2
+        and g.math.abs(minZ-expected[3]) < 0.2 and g.math.abs(maxZ-expected[4]) < 0.2
+    if not boundsMatch and self.boundaryLabTemplate and self.boundaryLabTemplate.bounds then
+        local tb = self.boundaryLabTemplate.bounds
+        if g.math.abs(minX-tb[1]) < 0.2 and g.math.abs(maxX-tb[2]) < 0.2
+            and g.math.abs(minZ-tb[3]) < 0.2 and g.math.abs(maxZ-tb[4]) < 0.2 then
+            expected = tb
+            boundsMatch = true
+            self.boundaryLabProbeBounds = tb
+            self.boundaryLabExpectedBounds = tb
+            self.boundaryLabActiveSeed = self.boundaryLabTemplate.seed
+            self.boundaryLabCommitResult = nil
+            if self.boundaryLabResearch then
+                self.boundaryLabResearch.width = 0
+                self.boundaryLabResearch.seed = nil
+                self.boundaryLabResearch.bounds = nil
+            end
+            if g.type(Research.SyncBoundarySize) == "function" then
+                Research.SyncBoundarySize(1024)
+            end
+            log("CONTOUR_RESYNC_TO_STOCK after Undo")
+        end
+    end
+    g.assert(boundsMatch,
         "Unsupported or already expanded contour; expected original biome boundary")
     if requestedWidth and not allowShrink then
         g.assert(maxX-minX<=requestedWidth+0.1 and maxZ-minZ<=requestedWidth+0.1,
@@ -662,11 +716,21 @@ local function expand(self,requestedWidth,allowShrink)
     self.boundaryLabCommitResult={seed=self.boundaryLabPreparedSeed,
         bounds={-rectangleHalf,rectangleHalf,-rectangleHalf,rectangleHalf}}
     self.boundaryLabPreview = nil
-    api.undo.Checkpoint({})
+    -- Service expansion is permanent progression; exclude from player's undo stack
+    -- so that building undos (Ctrl+Z) do not dismantle the park boundary.
     if w.park then
         if g.type(w.park.UnlockAllPlots)=="function" then g.pcall(w.park.UnlockAllPlots,w.park,true) end
         if g.type(w.park.ClearAllPlotRestrictions)=="function" then g.pcall(w.park.ClearAllPlotRestrictions,w.park) end
         if g.type(w.park.ClearEnforcedPlacementArea)=="function" then g.pcall(w.park.ClearEnforcedPlacementArea,w.park) end
+    end
+    if w.scenery_editconstraint and g.type(w.scenery_editconstraint.ClearEditConstraintsForAllParts)=="function" then
+        g.pcall(w.scenery_editconstraint.ClearEditConstraintsForAllParts,w.scenery_editconstraint)
+    end
+    if w.rides and g.type(w.rides.SetAllRidesEditable)=="function" then
+        g.pcall(w.rides.SetAllRidesEditable,w.rides,true)
+    end
+    if api and api.track and g.type(api.track.ClearAllTrackEditConstraints)=="function" then
+        g.pcall(api.track.ClearAllTrackEditConstraints)
     end
     if w.crowdsimulation and g.type(w.crowdsimulation.SetVoxelTerrain)=="function" then
         local tid = w.voxelterrain and w.voxelterrain:GetPrimaryVoxelTerrainEntityID()
@@ -694,7 +758,7 @@ local function expand(self,requestedWidth,allowShrink)
     end
     M.lastCode = "BL22-COMMIT-OK"
     Research.Progress(self,100,"Park expanded.")
-    self.boundaryLabReport="Park Expansions 0.56 report\n"..g.table.concat(reportLines,"\n")
+    self.boundaryLabReport="Park Expansions 0.57 report\n"..g.table.concat(reportLines,"\n")
     if requestedWidth then return end
     notice((cfg.Shape == "rectangle" and "COMMIT COMPLETE - rectangle " .. rectangleHalf*2 .. " x " .. rectangleHalf*2 .. " m"
         or "COMMIT COMPLETE - contour scaled by " .. cfg.Factor)
@@ -793,5 +857,5 @@ function M.AddLuaHooks(add)
     end)
 end
 
-log("DATABASE LOADED - Park Expansions 0.56 experimental expansion")
+log("DATABASE LOADED - Park Expansions 0.57 experimental expansion")
 return M

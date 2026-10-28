@@ -1306,6 +1306,103 @@ static DWORD WINAPI BackgroundWorkerProc(LPVOID param) {
     return 0;
 }
 
+static std::string narrow(const std::wstring& source) {
+    if (source.empty()) return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, source.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (n <= 0) return {};
+    std::string result(n, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, source.c_str(), -1, result.data(), n, nullptr, nullptr);
+    result.pop_back();
+    return result;
+}
+
+static bool backup_save_file(const std::string& save_id, const std::string& park_name, std::string& out_source, std::string& out_backup) {
+    wchar_t userprofile[MAX_PATH];
+    DWORD len = GetEnvironmentVariableW(L"USERPROFILE", userprofile, MAX_PATH);
+    if (!len || len >= MAX_PATH) return false;
+
+    fs::path base = fs::path(userprofile) / L"Saved Games" / L"Frontier Developments" / L"Planet Coaster 2";
+    std::error_code ec;
+    if (!fs::exists(base, ec)) return false;
+
+    struct Candidate {
+        fs::path path;
+        std::filesystem::file_time_type mtime;
+    };
+    std::vector<Candidate> candidates;
+
+    for (const auto& entry : fs::directory_iterator(base, ec)) {
+        if (!entry.is_directory(ec)) continue;
+        fs::path saves_dir = entry.path() / L"Saves";
+        if (!fs::exists(saves_dir, ec) || !fs::is_directory(saves_dir, ec)) continue;
+
+        for (const auto& f : fs::directory_iterator(saves_dir, ec)) {
+            if (!f.is_regular_file(ec)) continue;
+            auto ext = f.path().extension().wstring();
+            if (ext == L".park2") {
+                candidates.push_back({f.path(), f.last_write_time(ec)});
+            }
+        }
+    }
+    if (candidates.empty()) return false;
+
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        return a.mtime > b.mtime;
+    });
+
+    fs::path target;
+    std::string lower_id = save_id;
+    std::transform(lower_id.begin(), lower_id.end(), lower_id.begin(), ::tolower);
+    std::string lower_name = park_name;
+    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+
+    if (!lower_id.empty()) {
+        for (const auto& c : candidates) {
+            std::string filename = narrow(c.path.filename().wstring());
+            std::string lower_fname = filename;
+            std::transform(lower_fname.begin(), lower_fname.end(), lower_fname.begin(), ::tolower);
+            if (lower_fname.find(lower_id) != std::string::npos) {
+                target = c.path;
+                break;
+            }
+        }
+    }
+
+    if (target.empty() && !lower_name.empty()) {
+        for (const auto& c : candidates) {
+            std::string filename = narrow(c.path.filename().wstring());
+            std::string lower_fname = filename;
+            std::transform(lower_fname.begin(), lower_fname.end(), lower_fname.begin(), ::tolower);
+            if (lower_fname.find(lower_name) == 0) {
+                target = c.path;
+                break;
+            }
+        }
+    }
+
+    if (target.empty()) {
+        target = candidates[0].path;
+    }
+
+    fs::path backups_dir = target.parent_path() / L"ParkExpansions_Backups";
+    fs::create_directories(backups_dir, ec);
+
+    fs::path backup_park2 = backups_dir / (target.stem().wstring() + L"_pre_expansion.park2");
+    fs::path backup_bak = target.parent_path() / (target.filename().wstring() + L".bak");
+
+    BOOL ok1 = CopyFileW(target.c_str(), backup_park2.c_str(), FALSE);
+    BOOL ok2 = CopyFileW(target.c_str(), backup_bak.c_str(), FALSE);
+
+    if (ok1 || ok2) {
+        out_source = narrow(target.filename().wstring());
+        out_backup = narrow(backup_bak.filename().wstring());
+        bridgeDebug("Auto-backup created: source=%ls -> %ls and %ls",
+            target.c_str(), backup_bak.c_str(), backup_park2.c_str());
+        return true;
+    }
+    return false;
+}
+
 extern "C" __declspec(dllexport) int Begin(void* L) {
     fs::path status;
     try {
@@ -1375,6 +1472,17 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
                 }
             } catch (...) {}
             atomicWrite(status, "return {status=\"ok\"}\n");
+            return 0;
+        }
+
+        if (std::strcmp(identifier, "__backup_save__") == 0) {
+            std::string out_source, out_backup;
+            bool ok = backup_save_file(name, biome, out_source, out_backup);
+            if (ok) {
+                atomicWrite(status, "return {status=\"backup_ok\",source=\"" + out_source + "\",backupFile=\"" + out_backup + "\"}\n");
+            } else {
+                atomicWrite(status, "return {status=\"not_found\"}\n");
+            }
             return 0;
         }
 

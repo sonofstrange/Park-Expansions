@@ -572,10 +572,51 @@ function R.InstallCameraZoomFix()
         end)
 end
 
+function R.BackupNormalPark(world)
+    local manager=world.parkLoadSaveManager
+    local request=manager and manager.tLoadParkFromSaveTokenRequest
+    if not request or not request.cSaveToken then return end
+    if g.type(api.save.GetSaveMetadata)~="function" then return end
+    local ok,metadata=g.pcall(api.save.GetSaveMetadata,request.cSaveToken)
+    local save=ok and metadata and metadata.tSave
+    local isNormalPark=not save or not save.parkExpansions
+    if not isNormalPark then return end
+
+    local saveId=""
+    if g.type(api.save.GetSaveIdentifier)=="function" then
+        local okId,id=g.pcall(api.save.GetSaveIdentifier,request.cSaveToken)
+        if okId and id then saveId=g.tostring(id) end
+    end
+    local parkName=g.tostring(metadata and metadata.sName or (save and save.sParkName) or "")
+
+    if not g.package or g.type(g.package.loadlib)~="function" then return end
+    local loaded,begin=g.pcall(g.package.loadlib,
+        "Win64/ovldata/Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll","Begin")
+    if loaded and g.type(begin)=="function" then
+        local nonce=g.tostring(g.math.random(1,1000000000)).."-"..g.tostring(g.math.random(1,1000000000))
+        local okCall=g.pcall(begin,"__backup_save__",saveId,parkName,nonce)
+        if okCall then
+            local base="Win64/ovldata/Mod_BoundaryLab/AutoConversion/"
+            local chunk=g.loadfile(base.."State-"..nonce..".lua","t",{})
+            if chunk then
+                local resOK,res=g.pcall(chunk)
+                if resOK and g.type(res)=="table" and res.status=="backup_ok" then
+                    world.parkExpansionsBackupCreated=res.backupFile
+                    world.parkExpansionsBackupSource=res.source
+                    if api.debug and api.debug.Trace then
+                        api.debug.Trace("Park Expansions: backup created -> "..g.tostring(res.backupFile))
+                    end
+                end
+            end
+        end
+    end
+end
+
 function R.BeforeLoad(world)
     current=world
     world.parkExpansionsParkReady=false
     R.LoadConfig(world)
+    g.pcall(R.BackupNormalPark,world)
     local mapOK,mapResult=g.pcall(R.PrepareMap,world)
     if not mapOK or mapResult==false then
         world.parkExpansionsMapFailed=true
@@ -667,6 +708,20 @@ function R.AfterLoad(world,templates)
             if g.type(w.park.UnlockAllPlots)=="function" then g.pcall(w.park.UnlockAllPlots,w.park,true) end
             if g.type(w.park.ClearAllPlotRestrictions)=="function" then g.pcall(w.park.ClearAllPlotRestrictions,w.park) end
             if g.type(w.park.ClearEnforcedPlacementArea)=="function" then g.pcall(w.park.ClearEnforcedPlacementArea,w.park) end
+        end
+        if w then
+            if w.scenery_editconstraint and g.type(w.scenery_editconstraint.ClearEditConstraintsForAllParts)=="function" then
+                g.pcall(w.scenery_editconstraint.ClearEditConstraintsForAllParts,w.scenery_editconstraint)
+            end
+            if w.rides and g.type(w.rides.SetAllRidesEditable)=="function" then
+                g.pcall(w.rides.SetAllRidesEditable,w.rides,true)
+            end
+            if api.track and g.type(api.track.ClearAllTrackEditConstraints)=="function" then
+                g.pcall(api.track.ClearAllTrackEditConstraints)
+            end
+            if w.flumes and g.type(w.flumes.SetAllPlatformsEditable)=="function" then
+                g.pcall(w.flumes.SetAllPlatformsEditable,w.flumes,true)
+            end
         end
         if w and w.crowdsimulation and g.type(w.crowdsimulation.SetVoxelTerrain)=="function" then
             local tid = w.voxelterrain and w.voxelterrain:GetPrimaryVoxelTerrainEntityID()
@@ -790,7 +845,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.56 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.57 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_SIZE="..g.tostring(current.parkExpansionsTerrainSize or 2048)
         .."\nSEA_RASTER="..g.tostring(nativeSea.ready and 4096 or "unavailable")
         .."\nSEA_RASTER_ERROR="..g.tostring(nativeSea.error)

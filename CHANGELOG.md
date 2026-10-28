@@ -2,6 +2,25 @@
 
 All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in this file.
 
+## [0.57] - 2026-10-28
+
+### Fixed
+- **Undo / Redo Crash on Expansion:**
+  - Removed boundary expansion and scenery restoration checkpoints from the player's undo stack (`api.undo.Checkpoint({})`), preventing accidental Ctrl+Z dismantling of the boundary ring.
+  - Hardened contour probing against dangling/null pointers after undo operations; invalid or missing posts/panels fall back safely to the stock biome template instead of causing an Access Violation crash.
+  - Added automatic resynchronization to stock bounds if boundary points match the biome baseline after an undo.
+- **Scenery Edit and Delete Locks:**
+  - Fixed an issue where scenery objects near the former boundary and restored background decor could not be edited or deleted (`deleteEnabled = false` due to `partSet:CanEdit() == false`).
+  - Automatically clears edit constraints across all scenery parts, rides, flumes, and coaster tracks (`ClearEditConstraintsForAllParts()`, `SetAllRidesEditable(true)`, `ClearAllTrackEditConstraints()`, `SetAllPlatformsEditable(true)`) upon expansion, save loading, and scenery placement.
+
+### Added
+- **Automatic Save Backup System:**
+  - When loading a previously unmanaged/vanilla park for the first time, the mod automatically creates a backup of the original `.park2` save file before any conversion or expansion occurs.
+  - Backups are stored as `<SaveName>-<ID>.park2.bak` alongside the original save, and also saved into `Saved Games/Frontier Developments/Planet Coaster 2/<SteamID>/Saves/ParkExpansions_Backups/` for safe recovery.
+
+### Known issues
+- Pathfinding in expanded areas: guests can walk past the vanilla boundary, but ride queue entrances and route selection in expanded territory can exhibit detours or strange routing. Investigation ongoing.
+
 ## [0.56] - 2026-10-28
 
 ### Fixed

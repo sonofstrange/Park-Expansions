@@ -302,4 +302,41 @@ assert(convertedMessage.boundaryLabMessage:find('Height setup failed',1,true))
 creationFails=false
 R.Shutdown(convertedMessage)
 print('PASS concise conversion success text; height failures remain visible instead of being hidden by success')
+
+-- Test auto-backup of normal parks
+local backupCalled = 0
+local lastBackupId, lastBackupName
+package = {loadlib=function(dll, fn)
+    assert(dll:find("ParkExpansionsBridge.dll") and fn=="Begin")
+    return function(cmd, saveId, parkName, nonce)
+        if cmd == "__backup_save__" then
+            backupCalled = backupCalled + 1
+            lastBackupId = saveId
+            lastBackupName = parkName
+        end
+    end
+end}
+api.save.GetSaveMetadata = function(token)
+    if token == "vanilla-token" then return {sName="VanillaPark", tSave={sParkName="VanillaPark"}} end
+    if token == "modded-token" then return {sName="ModdedPark", tSave={parkExpansions={version=1}}} end
+    return nil
+end
+api.save.GetSaveIdentifier = function(token) return token == "vanilla-token" and "1234ABCD" or "5678EF01" end
+
+local vanillaPark = {parkLoadSaveManager={tLoadParkFromSaveTokenRequest={cSaveToken="vanilla-token"}}}
+R.BackupNormalPark(vanillaPark)
+assert(backupCalled == 1 and lastBackupId == "1234ABCD" and lastBackupName == "VanillaPark", "Vanilla park must be backed up")
+
+local moddedPark = {parkLoadSaveManager={tLoadParkFromSaveTokenRequest={cSaveToken="modded-token"}}}
+R.BackupNormalPark(moddedPark)
+assert(backupCalled == 1, "Already managed park must not trigger normal park backup")
+
+local newPark = {parkLoadSaveManager={}}
+R.BackupNormalPark(newPark)
+assert(backupCalled == 1, "New park from template must not trigger save backup")
+print('PASS auto-backup triggers for normal unmanaged parks and skips modded/new maps')
+
+package = nil
+api.save.GetSaveMetadata = nil
+api.save.GetSaveIdentifier = nil
 require=originalRequire
