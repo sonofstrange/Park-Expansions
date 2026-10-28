@@ -2,6 +2,23 @@
 
 All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in this file.
 
+## [0.59] - 2026-10-29
+
+### Fixed
+- Ctrl+Z no longer reverses a successfully applied park boundary expansion. The completed expansion becomes the new undo/redo baseline, keeping the boundary consistent with purchased research.
+- Failed and diagnostic expansion attempts leave undo history unchanged.
+
+### Behavior change
+- Successful boundary changes clear previous undo and redo history. Construction performed after expansion can still be undone normally.
+- Added an English notice in the research and manual configuration panels explaining the history reset.
+
+### Validation
+- The user confirmed the fix in-game. All 14 Lua test modules and native regression checks pass.
+
+### Known issues
+- Guests may still get stuck or take detours in expanded areas, including at ride queue entrances.
+- Existing-save conversion remains experimental. Back up saves before use.
+
 ## [0.58] - 2026-10-29
 
 ### Fixed

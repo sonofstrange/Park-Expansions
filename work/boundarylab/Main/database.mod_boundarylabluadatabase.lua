@@ -1,4 +1,4 @@
--- Park Expansions 0.58: extends copied voxel storage; original terrain is retained.
+-- Park Expansions 0.59: extends copied voxel storage; original terrain is retained.
 local g = _G
 local api = g.api
 local M = {}
@@ -178,7 +178,7 @@ end
 
 local function notice(message)
     log(message)
-    local report = "Park Expansions 0.58 report\n" .. g.table.concat(reportLines,"\n")
+    local report = "Park Expansions 0.59 report\n" .. g.table.concat(reportLines,"\n")
     local copied,result = g.pcall(function()
         return api.world.GetWorldAPIs().editors:CopyToClipboard(report)
     end)
@@ -186,7 +186,7 @@ local function notice(message)
         and "\n\nReport copied to clipboard. Paste it in chat with Ctrl+V."
         or "\n\nClipboard unavailable. Short result: " .. g.tostring(M.lastCode or "BL22-ERROR")
     g.require("Helpers.PopUpDialogUtils").RunOKDialog(
-        "[STRING_LITERAL:Value=|Park Expansions 0.58|]",
+        "[STRING_LITERAL:Value=|Park Expansions 0.59|]",
         "[STRING_LITERAL:Value=|" .. message .. hint .. "|]")
 end
 
@@ -274,7 +274,7 @@ end
 local function expand(self,requestedWidth,allowShrink)
     reportLines = {}
     M.lastCode = "BL22-ERROR"
-    log("RUN Park Expansions 0.58")
+    log("RUN Park Expansions 0.59")
     for _,line in g.ipairs(self.boundaryLabLoadLines or {}) do log(line) end
     local cfg = {}
     local chunk, err = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Config.ini", "t", cfg)
@@ -745,12 +745,20 @@ local function expand(self,requestedWidth,allowShrink)
     end
     Research.Progress(self,90,"Applying expansion…")
     g.coroutine.yield()
-    wait(api.undo.CommitPreview(preview))
+    g.assert(g.type(api.undo.Checkpoint)=="function" and g.type(api.undo.ClearHistory)=="function",
+        "Cannot make expansion permanent: undo history API is unavailable")
+    local commitToken=api.undo.CommitPreview(preview)
+    g.assert(commitToken~=nil,"Boundary commit did not start")
+    wait(commitToken)
     self.boundaryLabCommitResult={seed=self.boundaryLabPreparedSeed,
         bounds={-rectangleHalf,rectangleHalf,-rectangleHalf,rectangleHalf}}
     self.boundaryLabPreview = nil
-    -- Service expansion is permanent progression; exclude from player's undo stack
-    -- so that building undos (Ctrl+Z) do not dismantle the park boundary.
+    -- CommitPreview itself records undo data; omitting Checkpoint only merges
+    -- the boundary into the next edit. The public API has no selective removal.
+    -- Establish a new baseline only AFTER the native commit has completed.
+    api.undo.Checkpoint({})
+    api.undo.ClearHistory({})
+    log("UNDO_BASELINE_RESET boundary committed; earlier undo/redo history cleared")
     if w.park then
         if g.type(w.park.UnlockAllPlots)=="function" then g.pcall(w.park.UnlockAllPlots,w.park,true) end
         if g.type(w.park.ClearAllPlotRestrictions)=="function" then g.pcall(w.park.ClearAllPlotRestrictions,w.park) end
@@ -791,7 +799,7 @@ local function expand(self,requestedWidth,allowShrink)
     end
     M.lastCode = "BL22-COMMIT-OK"
     Research.Progress(self,100,"Park expanded.")
-    self.boundaryLabReport="Park Expansions 0.58 report\n"..g.table.concat(reportLines,"\n")
+    self.boundaryLabReport="Park Expansions 0.59 report\n"..g.table.concat(reportLines,"\n")
     if requestedWidth then return end
     notice((cfg.Shape == "rectangle" and "COMMIT COMPLETE - rectangle " .. rectangleHalf*2 .. " x " .. rectangleHalf*2 .. " m"
         or "COMMIT COMPLETE - contour scaled by " .. cfg.Factor)
@@ -890,5 +898,5 @@ function M.AddLuaHooks(add)
     end)
 end
 
-log("DATABASE LOADED - Park Expansions 0.58 experimental expansion")
+log("DATABASE LOADED - Park Expansions 0.59 experimental expansion")
 return M

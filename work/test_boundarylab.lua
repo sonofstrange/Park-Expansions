@@ -24,6 +24,8 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
         return groundHeight
     end
     local committed,cancelled,queried,popupCount,editEnabled = 0,0,0,0,false
+    local history={"previous construction"}
+    local historyClears,completed=0,false
     local clipboardReport
     local trace = {}
     local V = {}
@@ -138,7 +140,7 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
     if groundMode=="missing" then w.voxelterrain.PointTest=nil end
     local validationCalls,previewCount=0,0
     api={debug={Trace=function(s) trace[#trace+1]=s end},world={GetWorldAPIs=function() return w end},
-        undo={IsBusy=function() return false end,IsOperationComplete=function() return true end,
+        undo={IsBusy=function() return false end,IsOperationComplete=function(token) if token=="committed" then completed=true end;return true end,
             PreviewChangeList=function() previewCount=previewCount+1;return "busy","preview" end,
             CanCommitPreview=function()
                 validationCalls=validationCalls+1
@@ -158,13 +160,18 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
                 end
                 return allowCommit
             end,
-            CommitPreview=function() committed=committed+1;return "committed" end,
+            CommitPreview=function() committed=committed+1;history[#history+1]="boundary";return "committed" end,
             CancelPreview=function() cancelled=cancelled+1;return "cancelled" end,
             GetCommitFailReasons=function()
                 if controlAccepted and previewCount==2 then return {} end
                 if pendingKind and validationCalls<=8 then return {bUnknown=true,outsideBounds=false} end
                 return {outsideBounds=not allowCommit,bUnknown=false}
-            end,Checkpoint=function() end}}
+            end,Checkpoint=function() end,
+            ClearHistory=function()
+                assert(completed,"History cleared before native commit completed")
+                assert(committed==1,"History cleared without a successful expansion")
+                historyClears=historyClears+1;history={}
+            end}}
     io=nil
     loadfile=function(path,...)
         if path:match("Config.ini$") then
@@ -183,7 +190,7 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
         if module=="Helpers.PopUpDialogUtils" then
             return {RunOKDialog=function(_,message)
                 popupCount=popupCount+1
-                assert(clipboardReport and clipboardReport:find("Park Expansions 0.58 report",1,true),"Missing clipboard report")
+                assert(clipboardReport and clipboardReport:find("Park Expansions 0.59 report",1,true),"Missing clipboard report")
                 assert(clipboardReport:find("CONNECTED posts="..#posts.." panels="..#panels,1,true),"Missing contour diagnosis")
                 if not allowCommit then assert(message:find("outsideBounds=true",1,true),"Lost rejection details") end
                 if controlAccepted then assert(message:find("Unchanged contour: accepted",1,true),"Lost control result") end
@@ -291,6 +298,14 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
         end
     else
         assert(committed==0 and cancelled==5 and popupCount==1,"A diagnostic preview was not cancelled")
+    end
+    if committed==1 then
+        assert(historyClears==1 and #history==0,"Boundary expansion remains undoable")
+        -- Future player edits still use the normal engine history.
+        history[#history+1]="new construction"
+        assert(table.remove(history)=="new construction" and #history==0)
+    else
+        assert(historyClears==0 and history[1]=="previous construction","Rejected or diagnostic operation erased user history")
     end
     io,loadfile,require=originalIO,originalLoadfile,originalRequire
     print("PASS "..name)

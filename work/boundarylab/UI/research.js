@@ -119,7 +119,8 @@ class ExpansionPanel extends preact.Component {
                     u.reason && preact.h('div',{className:'BL_requirement'},u.reason),
                     preact.h(Button,{rootClassName:'BL_researchAction',label:literal(u.label),
                         modifiers:'inverted',disabled:!u.allowed,onSelect:()=>this.purchase(u)}),
-                    u.name==='height' && preact.h('p',{className:'BL_detailNote'},'Measured from world Y=0.'))));
+                    preact.h('p',{className:'BL_detailNote'},u.name==='height'
+                        ? 'Measured from world Y=0.' : 'Expanding the park resets undo history.'))));
     }
     manual() {
         return preact.h('div',{className:'BL_manual'},
@@ -130,7 +131,7 @@ class ExpansionPanel extends preact.Component {
                     preact.h('strong',null,dimension('width',snapshot.manualSize))),
                 preact.h('div',{className:'BL_manualMetric'},preact.h('span',null,'HEIGHT CEILING'),
                     preact.h('strong',null,dimension('height',snapshot.manualHeight)))),
-            preact.h('p',null,'Change limits in Config.ini, then reload the park.'),
+            preact.h('p',null,'Change limits in Config.ini, then reload the park. Changing park size resets undo history.'),
             (snapshot.manualSize>2048 || snapshot.manualHeight>2048) && preact.h('div',{className:'BL_warning'},
                 'Values above 2048 may be unstable.'));
     }
