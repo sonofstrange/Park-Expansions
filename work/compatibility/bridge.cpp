@@ -23,8 +23,12 @@
 #include "navigation_bounds.h"
 #include "crowd_grid.h"
 #include "miniz.h"
+#include <shlobj.h>
+#include <knownfolders.h>
 
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
 
 namespace fs = std::filesystem;
 
@@ -148,6 +152,16 @@ static void atomicWrite(const fs::path& path, const std::string& text) {
     if (f == INVALID_HANDLE_VALUE) return;
     DWORD count = 0;
     bool ok = WriteFile(f, text.data(), static_cast<DWORD>(text.size()), &count, nullptr) && count == text.size();
+    CloseHandle(f);
+    if (ok) MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
+
+static void atomicWriteBytes(const fs::path& path, const uint8_t* data, size_t size) {
+    auto temp = path; temp += L".native-tmp";
+    HANDLE f = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD count = 0;
+    bool ok = WriteFile(f, data, static_cast<DWORD>(size), &count, nullptr) && count == size;
     CloseHandle(f);
     if (ok) MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
 }
@@ -1316,14 +1330,22 @@ static std::string narrow(const std::wstring& source) {
     return result;
 }
 
-static bool backup_save_file(const std::string& save_id, const std::string& park_name, std::string& out_source, std::string& out_backup) {
-    wchar_t userprofile[MAX_PATH];
-    DWORD len = GetEnvironmentVariableW(L"USERPROFILE", userprofile, MAX_PATH);
-    if (!len || len >= MAX_PATH) return false;
-
-    fs::path base = fs::path(userprofile) / L"Saved Games" / L"Frontier Developments" / L"Planet Coaster 2";
+static fs::path find_save_file(const std::string& save_id, const std::string& park_name) {
+    fs::path base;
+    PWSTR known_path = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_SavedGames, 0, nullptr, &known_path)) && known_path) {
+        base = fs::path(known_path) / L"Frontier Developments" / L"Planet Coaster 2";
+        CoTaskMemFree(known_path);
+    }
     std::error_code ec;
-    if (!fs::exists(base, ec)) return false;
+    if (base.empty() || !fs::exists(base, ec)) {
+        wchar_t userprofile[MAX_PATH];
+        DWORD len = GetEnvironmentVariableW(L"USERPROFILE", userprofile, MAX_PATH);
+        if (len && len < MAX_PATH) {
+            base = fs::path(userprofile) / L"Saved Games" / L"Frontier Developments" / L"Planet Coaster 2";
+        }
+    }
+    if (base.empty() || !fs::exists(base, ec)) return {};
 
     struct Candidate {
         fs::path path;
@@ -1344,13 +1366,12 @@ static bool backup_save_file(const std::string& save_id, const std::string& park
             }
         }
     }
-    if (candidates.empty()) return false;
+    if (candidates.empty()) return {};
 
     std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
         return a.mtime > b.mtime;
     });
 
-    fs::path target;
     std::string lower_id = save_id;
     std::transform(lower_id.begin(), lower_id.end(), lower_id.begin(), ::tolower);
     std::string lower_name = park_name;
@@ -1362,28 +1383,30 @@ static bool backup_save_file(const std::string& save_id, const std::string& park
             std::string lower_fname = filename;
             std::transform(lower_fname.begin(), lower_fname.end(), lower_fname.begin(), ::tolower);
             if (lower_fname.find(lower_id) != std::string::npos) {
-                target = c.path;
-                break;
+                return c.path;
             }
         }
     }
 
-    if (target.empty() && !lower_name.empty()) {
+    if (!lower_name.empty()) {
         for (const auto& c : candidates) {
             std::string filename = narrow(c.path.filename().wstring());
             std::string lower_fname = filename;
             std::transform(lower_fname.begin(), lower_fname.end(), lower_fname.begin(), ::tolower);
             if (lower_fname.find(lower_name) == 0) {
-                target = c.path;
-                break;
+                return c.path;
             }
         }
     }
 
-    if (target.empty()) {
-        target = candidates[0].path;
-    }
+    return candidates[0].path;
+}
 
+static bool backup_save_file(const std::string& save_id, const std::string& park_name, std::string& out_source, std::string& out_backup) {
+    fs::path target = find_save_file(save_id, park_name);
+    if (target.empty()) return false;
+
+    std::error_code ec;
     fs::path backups_dir = target.parent_path() / L"ParkExpansions_Backups";
     fs::create_directories(backups_dir, ec);
 
@@ -1401,6 +1424,327 @@ static bool backup_save_file(const std::string& save_id, const std::string& park
         return true;
     }
     return false;
+}
+
+static void convert_save(const fs::path& mod_dir, const std::string& identifier,
+                         const std::string& park_name, const std::string& biome_arg,
+                         const std::string& nonce) {
+    fs::path cache = mod_dir / "AutoConversion";
+    fs::create_directories(cache);
+    int progress_seq = 0;
+
+    auto progress = [&](int pct, const std::string& msg) {
+        progress_seq++;
+        fs::path p = cache / ("Progress-" + nonce + "-" + std::to_string(progress_seq) + ".lua");
+        atomicWrite(p, "return {status=\"working\",progress=" + std::to_string(pct) + ",message=\"" + msg + "\"}\n");
+    };
+
+    auto fail = [&](const std::string& err) {
+        fs::path p = cache / ("Result-" + nonce + ".lua");
+        atomicWrite(p, "return {status=\"error\",progress=0,message=\"" + err + "\"}\n");
+    };
+
+    auto skip = [&](const std::string& msg) {
+        fs::path p = cache / ("Result-" + nonce + ".lua");
+        atomicWrite(p, "return {status=\"skip\",progress=0,message=\"" + msg + "\"}\n");
+    };
+
+    try {
+        progress(5, "Finding the selected local save");
+        fs::path save_path = find_save_file(identifier, park_name);
+        if (save_path.empty() || !fs::exists(save_path)) {
+            fail("Could not find local save file for conversion. Original park unchanged.");
+            return;
+        }
+
+        std::string raw_biome = biome_arg;
+        std::transform(raw_biome.begin(), raw_biome.end(), raw_biome.begin(), ::tolower);
+        std::string donor_name;
+        double seed[3]{};
+        double bounds[4]{};
+
+        if (raw_biome == "temperate") {
+            donor_name = "TemperateSandbox";
+            seed[0] = 505.0637512; seed[1] = 46.2103386; seed[2] = 498.8643494;
+            bounds[0] = -500.7930603; bounds[1] = 505.0637512; bounds[2] = -503.9561157; bounds[3] = 503.9422302;
+        } else if (raw_biome == "tropical") {
+            donor_name = "TropicalSandbox";
+            seed[0] = -497.2756653; seed[1] = 6.5644922; seed[2] = 484.7773743;
+            bounds[0] = -499.1105652; bounds[1] = 509.4645386; bounds[2] = -504.4102783; bounds[3] = 499.5578918;
+        } else if (raw_biome == "taiga") {
+            donor_name = "TaigaSandbox";
+            seed[0] = -486.1791382; seed[1] = 76.1536713; seed[2] = -486.6044006;
+            bounds[0] = -502.7882690; bounds[1] = 510.9080811; bounds[2] = -511.0911560; bounds[3] = 413.6222229;
+        } else if (raw_biome == "mediterranean") {
+            donor_name = "MediterraneanSandbox";
+            seed[0] = -506.6679993; seed[1] = 10.1644068; seed[2] = -502.8905640;
+            bounds[0] = -510.1216431; bounds[1] = 488.7711792; bounds[2] = -507.6991882; bounds[3] = 510.1072693;
+        } else {
+            fail("Unsupported biome: " + raw_biome);
+            return;
+        }
+
+        progress(15, "Checking the selected save");
+        auto file_bytes = read_file(save_path);
+        if (file_bytes.empty()) {
+            fail("Selected save file is empty.");
+            return;
+        }
+        std::string source_hash = sha256_hex_from_raw(sha256_raw(file_bytes.data(), file_bytes.size()).data(), 32);
+        fs::path native_file = cache / (wide(source_hash.c_str()) + L".bin");
+
+        std::string clean_name;
+        for (char c : park_name) {
+            if (c == '\\') clean_name += "\\\\";
+            else if (c == '"') clean_name += "\\\"";
+            else clean_name += c;
+        }
+
+        auto finish_ready = [&]() {
+            char res[1024];
+            snprintf(res, sizeof(res),
+                "return {status=\"ready\",progress=100,message=\"Conversion verified. Loading the expanded copy.\",\n"
+                "native=\"/run/Win64/ovldata/Mod_BoundaryLab/AutoConversion/%s.bin\",\n"
+                "info={version=1,filename=\"%s.bin\",terrainSize=2048,\n"
+                "seed={%.7f,%.7f,%.7f},\n"
+                "bounds={%.7f,%.7f,%.7f,%.7f},\n"
+                "sourceHash=\"%s\",sourceName=\"%s\"}}\n",
+                source_hash.c_str(), donor_name.c_str(),
+                seed[0], seed[1], seed[2],
+                bounds[0], bounds[1], bounds[2], bounds[3],
+                source_hash.c_str(), clean_name.c_str());
+            atomicWrite(cache / ("Result-" + nonce + ".lua"), res);
+        };
+
+        if (fs::exists(native_file) && fs::file_size(native_file) > 100) {
+            progress(95, "Loaded cached conversion");
+            finish_ready();
+            return;
+        }
+
+        mz_zip_archive zip{};
+        std::memset(&zip, 0, sizeof(zip));
+        if (!mz_zip_reader_init_mem(&zip, file_bytes.data(), file_bytes.size(), 0)) {
+            fail("Could not read park archive. Original park unchanged.");
+            return;
+        }
+
+        size_t meta_len = 0;
+        void* meta_ptr = mz_zip_reader_extract_file_to_heap(&zip, "metadata", &meta_len, 0);
+        if (meta_ptr) {
+            std::string meta_str(static_cast<const char*>(meta_ptr), meta_len);
+            mz_free(meta_ptr);
+            if (meta_str.find("parkExpansions") != std::string::npos) {
+                mz_zip_reader_end(&zip);
+                skip("Existing Park Expansions world data retained.");
+                return;
+            }
+        }
+
+        size_t park_len = 0;
+        void* park_ptr = mz_zip_reader_extract_file_to_heap(&zip, "parkdata", &park_len, 0);
+        mz_zip_reader_end(&zip);
+        if (!park_ptr || park_len < 32) {
+            if (park_ptr) mz_free(park_ptr);
+            fail("Missing native park data. Original park unchanged.");
+            return;
+        }
+
+        const uint8_t* u8 = static_cast<const uint8_t*>(park_ptr);
+        if (u8[0] != 0xff || u8[1] != 0x00 || u8[2] != 0xfe || u8[3] != 0x01) {
+            mz_free(park_ptr);
+            fail("Unknown native data envelope. Original park unchanged.");
+            return;
+        }
+        size_t body_len = park_len - 16;
+        const uint8_t* body_ptr = u8 + 16;
+
+        const char b_search[] = "BoundaryLabResearch";
+        if (std::search(body_ptr, body_ptr + body_len, b_search, b_search + 19) != body_ptr + body_len) {
+            mz_free(park_ptr);
+            skip("Existing Park Expansions world data retained.");
+            return;
+        }
+
+        std::vector<uint8_t> body_vec(body_ptr, body_ptr + body_len);
+        mz_free(park_ptr);
+
+        progress(25, "Checking terrain storage and park boundaries");
+        auto info = parse_clients(body_vec);
+        int vt_idx = -1;
+        for (size_t i = 0; i < info.blocks.size(); ++i) {
+            if (info.blocks[i].name == "VoxelTerrain") {
+                vt_idx = static_cast<int>(i);
+                break;
+            }
+        }
+        if (vt_idx < 0) {
+            fail("VoxelTerrain client block not found in save.");
+            return;
+        }
+        const auto& old_block = info.blocks[vt_idx];
+
+        const uint8_t marker_old[] = {0x05, 0x02, 0x01, 0x02, 0xc2, 0x00, 0x01, 0x00};
+        const uint8_t marker_expanded[] = {0x05, 0x04, 0x09, 0x04, 0xc2, 0x00, 0x01, 0x00};
+
+        auto it_old = std::search(body_vec.begin() + old_block.version_end, body_vec.begin() + old_block.end,
+                                  std::begin(marker_old), std::end(marker_old));
+        if (it_old == body_vec.begin() + old_block.end) {
+            auto it_exp = std::search(body_vec.begin() + old_block.version_end, body_vec.begin() + old_block.end,
+                                      std::begin(marker_expanded), std::end(marker_expanded));
+            if (it_exp != body_vec.begin() + old_block.end) {
+                skip("Existing Park Expansions terrain retained.");
+                return;
+            }
+            fail("Unsupported voxel terrain format in source save.");
+            return;
+        }
+        size_t old_pos = std::distance(body_vec.begin(), it_old);
+
+        fs::path donor_path = mod_dir / "Maps" / (donor_name + ".bin");
+        fs::path donor_trn = mod_dir / "Maps" / (donor_name + ".trn");
+        if (!fs::exists(donor_path) || !fs::exists(donor_trn)) {
+            progress(30, "Generating expanded base terrain");
+            prepare_map(mod_dir, raw_biome, nonce + "-prep");
+            if (!fs::exists(donor_path) || !fs::exists(donor_trn)) {
+                fail("Could not prepare base terrain for biome: " + donor_name);
+                return;
+            }
+        }
+
+        progress(50, "Merging park terrain with expanded world");
+        auto donor_bin = read_file(donor_path);
+        std::vector<uint8_t> donor_preamble;
+        auto donor_raw = unpack_game_save(donor_bin, donor_preamble);
+
+        auto donor_info = parse_clients(donor_raw);
+        int donor_vt_idx = -1;
+        for (size_t i = 0; i < donor_info.blocks.size(); ++i) {
+            if (donor_info.blocks[i].name == "VoxelTerrain") {
+                donor_vt_idx = static_cast<int>(i);
+                break;
+            }
+        }
+        if (donor_vt_idx < 0) {
+            fail("Donor VoxelTerrain not found in " + donor_name + ".bin");
+            return;
+        }
+        const auto& donor_block = donor_info.blocks[donor_vt_idx];
+        auto it_donor = std::search(donor_raw.begin() + donor_block.version_end, donor_raw.begin() + donor_block.end,
+                                    std::begin(marker_expanded), std::end(marker_expanded));
+        if (it_donor == donor_raw.begin() + donor_block.end) {
+            fail("Donor volume marker not found in " + donor_name + ".bin");
+            return;
+        }
+        size_t donor_pos = std::distance(donor_raw.begin(), it_donor);
+
+        Volume old_vol = parse_volume(body_vec.data() + old_pos, old_block.end - old_pos);
+        Volume donor_vol = parse_volume(donor_raw.data() + donor_pos, donor_block.end - donor_pos);
+
+        if (old_vol.shape[0] != 2 || old_vol.shape[1] != 1 || old_vol.shape[2] != 2 ||
+            donor_vol.shape[0] != 4 || donor_vol.shape[1] != 9 || donor_vol.shape[2] != 4) {
+            fail("Incompatible terrain voxel shape. Original park unchanged.");
+            return;
+        }
+
+        auto old_d = decode_density(old_vol.deltas.data(), old_vol.deltas.size());
+        auto donor_d = decode_density(donor_vol.deltas.data(), donor_vol.deltas.size());
+        auto old_m = extract_material_parts(old_vol);
+        auto donor_m = extract_material_parts(donor_vol);
+
+        std::vector<uint8_t> signs(18, 0);
+        std::vector<uint8_t> all_trees;
+        std::vector<uint8_t> all_densities;
+        std::vector<uint8_t> all_materials[4];
+
+        for (int z = 0; z < 4; ++z) {
+            for (int y = 0; y < 9; ++y) {
+                for (int x = 0; x < 4; ++x) {
+                    int index = (z * 9 + y) * 4 + x;
+                    const RootInfo* r = nullptr;
+                    const std::vector<uint8_t>* tree_src = nullptr;
+                    const uint8_t* d_src = nullptr;
+                    size_t d_count = 0;
+                    const MaterialPart* mp = nullptr;
+
+                    if ((x == 1 || x == 2) && y == 4 && (z == 1 || z == 2)) {
+                        int source = (z - 1) * 2 + (x - 1);
+                        r = &old_vol.roots[source];
+                        tree_src = &old_vol.tree;
+                        d_src = old_d.data() + r->sample_begin;
+                        d_count = r->sample_end - r->sample_begin;
+                        mp = &old_m[source];
+                    } else {
+                        r = &donor_vol.roots[index];
+                        tree_src = &donor_vol.tree;
+                        d_src = donor_d.data() + r->sample_begin;
+                        d_count = r->sample_end - r->sample_begin;
+                        mp = &donor_m[index];
+                    }
+
+                    signs[index / 8] |= (r->sign & 1) << (index % 8);
+                    all_trees.insert(all_trees.end(), tree_src->data() + r->tree_begin, tree_src->data() + r->tree_end);
+                    all_densities.insert(all_densities.end(), d_src, d_src + d_count);
+                    for (int p = 0; p < 3; ++p) {
+                        all_materials[p].insert(all_materials[p].end(), mp->plane[p].begin(), mp->plane[p].end());
+                    }
+                    all_materials[3].insert(all_materials[3].end(), mp->codes.begin(), mp->codes.end());
+                }
+            }
+        }
+
+        std::vector<uint8_t> replacement;
+        put_uint(replacement, 5);
+        put_uint(replacement, 4);
+        put_uint(replacement, 9);
+        put_uint(replacement, 4);
+        put_uint(replacement, 512);
+        put_uint(replacement, 1);
+        replacement.push_back(0);
+        replacement.insert(replacement.end(), signs.begin(), signs.end());
+        put_uint(replacement, static_cast<uint32_t>(all_trees.size()));
+        put_uint(replacement, static_cast<uint32_t>(all_densities.size()));
+        replacement.insert(replacement.end(), all_trees.begin(), all_trees.end());
+
+        auto enc_density = encode_density(all_densities.data(), all_densities.size());
+        replacement.insert(replacement.end(), enc_density.begin(), enc_density.end());
+        for (int p = 0; p < 4; ++p) {
+            replacement.insert(replacement.end(), all_materials[p].begin(), all_materials[p].end());
+        }
+
+        progress(80, "Verifying preserved park objects and terrain");
+        auto patched_body = patch_client(body_vec, "VoxelTerrain", replacement);
+
+        progress(92, "Preparing the converted world for loading");
+        auto comp_park = compress_raw_deflate(patched_body.data(), patched_body.size(), 6);
+        std::vector<uint8_t> final_bin;
+        const char comp_tag[] = "[PlCo2WoSa][COMP]";
+        final_bin.insert(final_bin.end(), comp_tag, comp_tag + 17);
+        final_bin.insert(final_bin.end(), comp_park.begin(), comp_park.end());
+
+        atomicWriteBytes(native_file, final_bin.data(), final_bin.size());
+        finish_ready();
+        bridgeDebug("Save auto-conversion complete: %s -> %ls", park_name.c_str(), native_file.c_str());
+    } catch (const std::exception& e) {
+        fail(std::string("Conversion failed: ") + e.what() + ". Original park unchanged.");
+    } catch (...) {
+        fail("Automatic conversion failed unexpectedly. Original park unchanged.");
+    }
+}
+
+struct SaveConvertTask {
+    fs::path mod_dir;
+    std::string identifier;
+    std::string name;
+    std::string biome;
+    std::string nonce;
+};
+
+static DWORD WINAPI SaveConvertProc(LPVOID param) {
+    auto* task = static_cast<SaveConvertTask*>(param);
+    convert_save(task->mod_dir, task->identifier, task->name, task->biome, task->nonce);
+    delete task;
+    return 0;
 }
 
 extern "C" __declspec(dllexport) int Begin(void* L) {
@@ -1506,6 +1850,16 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
             }
             return 0;
         }
+
+        // Automatic save conversion request
+        atomicWrite(status, "return {status=\"working\",progress=0,message=\"Starting automatic conversion\"}\n");
+        auto* task = new SaveConvertTask{mod, identifier, name, biome, nonce};
+        worker_thread = CreateThread(nullptr, 0, SaveConvertProc, task, 0, nullptr);
+        if (!worker_thread) {
+            delete task;
+            atomicWrite(status, "return {status=\"error\",message=\"Could not start conversion worker thread.\"}\n");
+        }
+        return 0;
 
     } catch (...) {
         if (!status.empty()) atomicWrite(status, "return {status=\"error\",message=\"Automatic conversion could not start. Original park unchanged.\"}\n");
