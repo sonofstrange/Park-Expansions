@@ -344,6 +344,27 @@ local function expand(self,requestedWidth,allowShrink)
     g.assert(boundsMatch,
         "Unsupported or already expanded contour; expected original biome boundary")
     if requestedWidth and not allowShrink then
+        if maxX-minX >= requestedWidth - 0.1 then
+            log("ALREADY_EXPANDED current=" .. (maxX-minX) .. " requested=" .. requestedWidth)
+            M.lastCode = "BL22-EXPANDED"
+            if self.boundaryLabResearch then
+                local widths = (self.parkExpansionsTerrainSize == 4096)
+                    and {1152, 1344, 1536, 1792, 2040, 3072, 4088}
+                    or {1152, 1344, 1536, 1792, 2040}
+                for lvl = #widths, 1, -1 do
+                    if (maxX - minX) >= widths[lvl] - 10 then
+                        if (self.boundaryLabResearch.width or 0) < lvl then
+                            self.boundaryLabResearch.width = lvl
+                        end
+                        break
+                    end
+                end
+            end
+            if g.type(Research.SyncBoundarySize) == "function" then
+                Research.SyncBoundarySize(maxX - minX)
+            end
+            return true
+        end
         g.assert(maxX-minX<=requestedWidth+0.1 and maxZ-minZ<=requestedWidth+0.1,
             "Refusing to shrink an existing park boundary")
     end

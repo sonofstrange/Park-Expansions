@@ -655,6 +655,19 @@ end
 function R.AfterLoad(world,templates)
     world.parkExpansionsParkReady=true
     local s=state(world)
+    local w=api.world.GetWorldAPIs()
+    if w and w.voxelterrain then
+        local vid=w.voxelterrain:GetPrimaryVoxelTerrainEntityID()
+        local a,b=w.voxelterrain:GetWorldBounds(vid)
+        if a and b then
+            local half=-a:GetX()
+            if half>1500 then
+                world.parkExpansionsTerrainSize=4096
+            elseif half>800 then
+                world.parkExpansionsTerrainSize=2048
+            end
+        end
+    end
     local converted=world.parkExpansionsConverted
     if world.parkExpansionsMapFailed then
         s.managed=false
@@ -703,6 +716,21 @@ function R.AfterLoad(world,templates)
         world.boundaryLabActiveSeed=s.seed
         world.boundaryLabExpectedBounds=s.bounds
         contours(world,world.boundaryLabTemplate)
+        if (s.width or 0) == 0 then
+            local span = 0
+            if s.bounds and s.bounds[2] and s.bounds[1] then
+                span = s.bounds[2] - s.bounds[1]
+            elseif world.boundaryLabProbeBounds and world.boundaryLabProbeBounds[2] then
+                span = world.boundaryLabProbeBounds[2] - world.boundaryLabProbeBounds[1]
+            end
+            local widths = R.WidthsFor(world)
+            for lvl = #widths, 1, -1 do
+                if span >= widths[lvl] - 10 then
+                    s.width = lvl
+                    break
+                end
+            end
+        end
         local w=api.world.GetWorldAPIs()
         if w and w.park then
             if g.type(w.park.UnlockAllPlots)=="function" then g.pcall(w.park.UnlockAllPlots,w.park,true) end
