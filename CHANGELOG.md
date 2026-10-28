@@ -10,6 +10,9 @@ All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in
 - Fixed nearby-memory allocation failing when no suitable address was available above the game code.
 - A navigation setup failure now reports its cause without aborting an otherwise supported terrain load.
 
+### Known issues
+- Pathfinding outside the original map boundary may still be unreliable. Crossing the old boundary now works, but route selection and navigation in expanded areas need further investigation.
+
 ### Diagnostics
 - Added `BridgeDebug.log` and navigation/crowd-grid status to **Copy Report**.
 

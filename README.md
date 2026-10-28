@@ -41,6 +41,8 @@ Each branch costs 12,500 / 25,000 / 50,000 / 100,000 / 200,000 research points. 
 
 ## Experimental
 
+**Known issue in 0.56:** guests can cross the original map boundary, but pathfinding in expanded areas may still be unreliable. Further investigation is ongoing.
+
 Back up your saves before use. Bugs, crashes, visual glitches and save compatibility issues are possible. Some changes may persist after removing the mod. Loading expanded saves without the mod has not been verified.
 
 ## Source and review
