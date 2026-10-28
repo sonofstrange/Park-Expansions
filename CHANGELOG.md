@@ -14,6 +14,7 @@ All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in
 - Regression tests for profile selection, scenery refunds, and restoration of the original cash mode.
 
 ### Known issues
+- Ctrl+Z can still undo a park boundary expansion while its research unlock remains recorded. Reapplying after undo has previously caused a crash and needs further investigation.
 - Guests can cross the original boundary, but may still get stuck or take detours in expanded areas, including at ride queues.
 - Existing-save conversion remains experimental. Keep a backup before testing.
 - DLL metadata does not guarantee that antivirus software will stop flagging the mod.
@@ -22,7 +23,7 @@ All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in
 
 ### Fixed
 - **Undo / Redo Crash on Expansion:**
-  - Removed boundary expansion and scenery restoration checkpoints from the player's undo stack (`api.undo.Checkpoint({})`), preventing accidental Ctrl+Z dismantling of the boundary ring.
+  - Removed explicit boundary expansion and scenery restoration checkpoints. This did not remove native placement transactions from undo history; Ctrl+Z can still undo an expansion (see the 0.58 known issues).
   - Hardened contour probing against dangling/null pointers after undo operations; invalid or missing posts/panels fall back safely to the stock biome template instead of causing an Access Violation crash.
   - Added automatic resynchronization to stock bounds if boundary points match the biome baseline after an undo.
 - **Scenery Edit and Delete Locks:**

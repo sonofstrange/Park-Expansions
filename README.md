@@ -43,6 +43,8 @@ Each branch costs 12,500 / 25,000 / 50,000 / 100,000 / 200,000 research points. 
 
 **Known issue in 0.58:** guests can cross the original map boundary, but pathfinding in expanded areas may still be unreliable. Further investigation is ongoing.
 
+**Undo warning:** Ctrl+Z can still revert a boundary expansion without reverting its research unlock. Reapplying after undo has previously caused a crash; this is not fixed in 0.58.
+
 Back up your saves before use. Bugs, crashes, visual glitches and save compatibility issues are possible. Some changes may persist after removing the mod. Loading expanded saves without the mod has not been verified.
 
 ## Source and review
