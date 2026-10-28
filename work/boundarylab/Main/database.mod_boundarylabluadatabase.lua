@@ -209,7 +209,15 @@ local function loadLargeTerrain(self,loader,originalLoad)
         log(message)
     end
     local originalFile,originalTerrainFile = request.sFileName,request.sTerrainFileName
-    local filename = originalFile:match("[^/]+$")
+    local rawName = originalFile:match("[^/\\]+$")
+    local canon = {
+        temperatesandbox = "TemperateSandbox.bin",
+        tropicalsandbox = "TropicalSandbox.bin",
+        taigasandbox = "TaigaSandbox.bin",
+        mediterraneansandbox = "MediterraneanSandbox.bin",
+    }
+    local lowerName = rawName and rawName:lower():gsub("%.bin$", "")
+    local filename = (lowerName and canon[lowerName]) or rawName
     self.boundaryLabFilename = filename
     request.sFileName = "/run/Win64/ovldata/Mod_BoundaryLab/" .. Research.MapFolder(self) .. "/" .. filename
     request.sTerrainFileName = request.sFileName:gsub("%.bin$",".trn")
@@ -219,7 +227,11 @@ local function loadLargeTerrain(self,loader,originalLoad)
     if not ok then
         request.sFileName,request.sTerrainFileName = originalFile,originalTerrainFile
         loadLog("PRESERVED_LOAD_ERROR " .. g.tostring(result))
-        g.pcall(notice,"PRESERVED TERRAIN LOAD FAILED: " .. g.tostring(result))
+        g.pcall(notice,"PRESERVED TERRAIN LOAD FAILED: " .. g.tostring(result) .. "; falling back to original terrain")
+        self.boundaryLabTerrainCreated = false
+        self.boundaryLabTemplate = nil
+        local fbOk,fbRes = g.pcall(originalLoad,self,loader)
+        if fbOk then return fbRes end
         g.error(result,0)
     end
     local w = api.world.GetWorldAPIs()
@@ -240,7 +252,7 @@ local function loadLargeTerrain(self,loader,originalLoad)
     local checkChunk = g.loadfile("Win64/ovldata/Mod_BoundaryLab/" .. Research.MapFolder(self) .. "/" .. filename:gsub("%.bin$",".checks.lua"),"t",checks)
     if not checkChunk then checkChunk = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Maps/GroundChecks.lua","t",checks) end
     local checkOK = checkChunk and g.pcall(checkChunk)
-    local expected = checkOK and checks.Heights and checks.Heights[filename]
+    local expected = checkOK and checks.Heights and (checks.Heights[filename] or checks.Heights[rawName] or (lowerName and checks.Heights[lowerName..".bin"]))
     if g.type(expected) ~= "table" then
         notice("Missing stock terrain checks; contour unchanged.")
         return result

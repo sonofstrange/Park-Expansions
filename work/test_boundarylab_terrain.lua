@@ -60,7 +60,7 @@ local function test(label,options)
  local database=assert(loadfile(source))()
  database.AddLuaHooks(function(_,hook) hook(class) end)
  local ok,result=pcall(class.OnLoad,self,{GetWorldName=function() return "World" end})
- assert(loaded==1,"World loaded more than once")
+ assert(loaded==(options.failure and 2 or 1),"World loaded unexpected number of times")
  if options.failure then
   assert(not ok and not self.boundaryLabTerrainCreated,"Load error was ignored")
   assert(request.sFileName==input,"Original load request was not restored on failure")
