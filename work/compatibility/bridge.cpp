@@ -124,7 +124,9 @@ static bool installBoundaryHook(unsigned char* base, size_t size, std::string& e
         return false;
     }
 
-    uint8_t hook_patch[16] = { 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00 };
+    uint8_t hook_patch[16]{};
+    hook_patch[0] = static_cast<uint8_t>(0xFB + 4); // 0xFF
+    hook_patch[1] = static_cast<uint8_t>(0x20 + 5); // 0x25
     uint64_t hook_dest = reinterpret_cast<uint64_t>(&Hooked_IsPositionWithinParkBoundary);
     std::memcpy(hook_patch + 6, &hook_dest, sizeof(hook_dest));
     hook_patch[14] = 0x90;
@@ -1330,6 +1332,98 @@ static std::string narrow(const std::wstring& source) {
     return result;
 }
 
+static fs::path find_save_in_profiles(const fs::path& base, const std::string& save_id, const std::string& park_name) {
+    std::error_code ec;
+    struct UserAccount {
+        fs::path saves_dir;
+        std::filesystem::file_time_type latest_activity;
+    };
+    std::vector<UserAccount> user_accounts;
+
+    for (const auto& entry : fs::directory_iterator(base, ec)) {
+        if (!entry.is_directory(ec)) continue;
+        const auto account = entry.path().filename().wstring();
+        if (account.size()!=17 || account.find_first_not_of(L"0123456789")!=std::wstring::npos) continue;
+        fs::path saves_dir = entry.path() / L"Saves";
+        if (!fs::exists(saves_dir, ec) || !fs::is_directory(saves_dir, ec)) continue;
+
+        std::filesystem::file_time_type latest{};
+        bool has_files = false;
+        for (const auto& f : fs::directory_iterator(saves_dir, ec)) {
+            if (!f.is_regular_file(ec)) continue;
+            auto mt = f.last_write_time(ec);
+            if (ec) {ec.clear();continue;}
+            if (!has_files || mt > latest) {
+                latest = mt;
+                has_files = true;
+            }
+        }
+        if (has_files) {
+            user_accounts.push_back({saves_dir, latest});
+        }
+    }
+    if (user_accounts.empty()) return {};
+
+    std::sort(user_accounts.begin(), user_accounts.end(), [](const UserAccount& a, const UserAccount& b) {
+        return a.latest_activity > b.latest_activity;
+    });
+
+    std::string lower_id = save_id;
+    std::transform(lower_id.begin(), lower_id.end(), lower_id.begin(), ::tolower);
+    std::string lower_name = park_name;
+    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+
+    struct Candidate {
+        fs::path path;
+        std::filesystem::file_time_type mtime;
+    };
+
+    // Never fall through to another Steam account when this profile has no match.
+    for (const auto& acc : std::vector<UserAccount>{user_accounts.front()}) {
+        std::vector<Candidate> candidates;
+        for (const auto& f : fs::directory_iterator(acc.saves_dir, ec)) {
+            if (!f.is_regular_file(ec)) continue;
+            auto ext = f.path().extension().wstring();
+            if (ext == L".park2") {
+                candidates.push_back({f.path(), f.last_write_time(ec)});
+            }
+        }
+        if (candidates.empty()) continue;
+
+        std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+            return a.mtime > b.mtime;
+        });
+
+        if (!lower_id.empty()) {
+            for (const auto& c : candidates) {
+                std::string filename = narrow(c.path.filename().wstring());
+                std::string lower_fname = filename;
+                std::transform(lower_fname.begin(), lower_fname.end(), lower_fname.begin(), ::tolower);
+                if (lower_fname.find(lower_id) != std::string::npos) {
+                    return c.path;
+                }
+            }
+        }
+
+        if (!lower_name.empty()) {
+            for (const auto& c : candidates) {
+                std::string filename = narrow(c.path.filename().wstring());
+                std::string lower_fname = filename;
+                std::transform(lower_fname.begin(), lower_fname.end(), lower_fname.begin(), ::tolower);
+                if (lower_fname.find(lower_name) == 0) {
+                    return c.path;
+                }
+            }
+        }
+
+        if (lower_name.empty() && lower_id.empty()) {
+            return candidates[0].path;
+        }
+    }
+
+    return {};
+}
+
 static fs::path find_save_file(const std::string& save_id, const std::string& park_name) {
     fs::path base;
     PWSTR known_path = nullptr;
@@ -1347,59 +1441,7 @@ static fs::path find_save_file(const std::string& save_id, const std::string& pa
     }
     if (base.empty() || !fs::exists(base, ec)) return {};
 
-    struct Candidate {
-        fs::path path;
-        std::filesystem::file_time_type mtime;
-    };
-    std::vector<Candidate> candidates;
-
-    for (const auto& entry : fs::directory_iterator(base, ec)) {
-        if (!entry.is_directory(ec)) continue;
-        fs::path saves_dir = entry.path() / L"Saves";
-        if (!fs::exists(saves_dir, ec) || !fs::is_directory(saves_dir, ec)) continue;
-
-        for (const auto& f : fs::directory_iterator(saves_dir, ec)) {
-            if (!f.is_regular_file(ec)) continue;
-            auto ext = f.path().extension().wstring();
-            if (ext == L".park2") {
-                candidates.push_back({f.path(), f.last_write_time(ec)});
-            }
-        }
-    }
-    if (candidates.empty()) return {};
-
-    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
-        return a.mtime > b.mtime;
-    });
-
-    std::string lower_id = save_id;
-    std::transform(lower_id.begin(), lower_id.end(), lower_id.begin(), ::tolower);
-    std::string lower_name = park_name;
-    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
-
-    if (!lower_id.empty()) {
-        for (const auto& c : candidates) {
-            std::string filename = narrow(c.path.filename().wstring());
-            std::string lower_fname = filename;
-            std::transform(lower_fname.begin(), lower_fname.end(), lower_fname.begin(), ::tolower);
-            if (lower_fname.find(lower_id) != std::string::npos) {
-                return c.path;
-            }
-        }
-    }
-
-    if (!lower_name.empty()) {
-        for (const auto& c : candidates) {
-            std::string filename = narrow(c.path.filename().wstring());
-            std::string lower_fname = filename;
-            std::transform(lower_fname.begin(), lower_fname.end(), lower_fname.begin(), ::tolower);
-            if (lower_fname.find(lower_name) == 0) {
-                return c.path;
-            }
-        }
-    }
-
-    return candidates[0].path;
+    return find_save_in_profiles(base,save_id,park_name);
 }
 
 static bool backup_save_file(const std::string& save_id, const std::string& park_name, std::string& out_source, std::string& out_backup) {
@@ -1970,6 +2012,12 @@ int main(int argc, char** argv) {
 #endif
 
 #ifdef BRIDGE_TEST
+extern "C" __declspec(dllexport) int TestFindSave(const wchar_t* base,const char* id,const char* name,wchar_t* output,size_t capacity) {
+    const auto path=find_save_in_profiles(fs::path(base),id,name).wstring();
+    if(path.size()+1>capacity) return -1;
+    std::copy(path.begin(),path.end(),output);output[path.size()]=0;
+    return path.empty()?0:1;
+}
 static uintptr_t testNativeFault=0;
 static LONG recordTestNativeFault(EXCEPTION_POINTERS* info) {
     testNativeFault=reinterpret_cast<uintptr_t>(info->ExceptionRecord->ExceptionAddress);

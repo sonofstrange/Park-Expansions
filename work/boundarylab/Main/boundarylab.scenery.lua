@@ -246,6 +246,7 @@ function S.AfterLoad(world,progress)
         w.park:DeactivateParkEditConstraints()
         changedConstraints=true
         world.parkExpansionsSceneryConstraints=true
+        local refundCategory = (w and w.park and (w.park.ExpenditureCategory_SceneryConstruction or w.park.ExpenditureCategory_Rewards)) or 0
         while cursor<=count do
             wait(function()return not api.undo.IsBusy() end,"Scenery editor stayed busy")
             local last=g.math.min(cursor+127,count)
@@ -288,7 +289,18 @@ function S.AfterLoad(world,progress)
             -- validation settles without requiring CanCommitPreview to be true.
             -- This exception restores original backdrop inside the verified voxel
             -- volume; it does not unlock plots or permit other validation failures.
-            local committed=api.undo.CommitPreview(preview)
+            local money=w.money
+            local cashBefore=money and g.type(money.GetCash)=="function" and money:GetCash() or nil
+            local previousUnlimited
+            if money and g.type(money.SetUnlimitedCash)=="function" then
+                g.assert(g.type(money.HasUnlimitedCash)=="function","Cannot read the original cash mode")
+                previousUnlimited=money:HasUnlimitedCash()
+                money:SetUnlimitedCash(true)
+            end
+            -- No coroutine yield while the temporary cash mode is active.
+            local commitOK,committed=g.pcall(api.undo.CommitPreview,preview)
+            if previousUnlimited~=nil then money:SetUnlimitedCash(previousUnlimited) end
+            g.assert(commitOK,committed)
             g.assert(committed~=nil,"Original scenery commit did not start")
             if backgroundBounds then state.boundsBatches=(state.boundsBatches or 0)+1 end
             preview=nil;world.parkExpansionsSceneryPreview=nil
@@ -298,6 +310,13 @@ function S.AfterLoad(world,progress)
             state.nextIndex=cursor;state.count=last;state.source=data.source
             wait(function()return api.undo.IsOperationComplete(committed)end,"Scenery commit timed out")
             wait(function()return not api.undo.IsBusy()end,"Scenery commit stayed busy")
+            if w and w.money and cashBefore and g.type(w.money.GetCash)=="function" and g.type(w.money.ModifyCash)=="function" then
+                local currentCash = w.money:GetCash()
+                local spent = cashBefore - currentCash
+                if spent > 0 then
+                    w.money:ModifyCash(spent, refundCategory)
+                end
+            end
             progress(true,g.math.floor(last*100/g.math.max(count,1)),"Restoring scenery: "..last.."/"..count)
             -- Give the native preview manager a full Advance between transactions.
             g.coroutine.yield()

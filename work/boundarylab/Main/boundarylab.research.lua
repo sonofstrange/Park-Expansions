@@ -82,6 +82,14 @@ function R.LoadConfig(world)
         ok,message=g.pcall(function()
             if values.ResearchEnabled==nil then values.ResearchEnabled=true end
             g.assert(g.type(values.ResearchEnabled)=="boolean","ResearchEnabled must be true or false")
+            if values.ConvertExistingSaves==nil then
+                if values.AutoConvertSaves~=nil then
+                    values.ConvertExistingSaves=values.AutoConvertSaves
+                else
+                    values.ConvertExistingSaves=true
+                end
+            end
+            g.assert(g.type(values.ConvertExistingSaves)=="boolean","ConvertExistingSaves must be true or false")
             if values.ManualParkSize==nil then values.ManualParkSize=2040 end
             if values.ManualMaxHeight==nil then values.ManualMaxHeight=2048 end
             local size=2048
@@ -124,7 +132,7 @@ function R.LoadConfig(world)
 end
 
 local function settings(world)
-    return world and world.parkExpansionsConfig or {ResearchEnabled=true,Enable4KMap=false,MaxMapSize=2048}
+    return world and world.parkExpansionsConfig or {ResearchEnabled=true,Enable4KMap=false,MaxMapSize=2048,ConvertExistingSaves=true}
 end
 
 local function points()
@@ -396,6 +404,8 @@ end
 -- the native Sea raster before any park loads.
 -- Conversion completes before the native loader sees any world data.
 function R.AutoConvert(world)
+    local cfg=settings(world)
+    if cfg.ConvertExistingSaves==false then return end
     local manager=world.parkLoadSaveManager
     local request=manager and manager.tLoadParkFromSaveTokenRequest
     if not request or not request.cSaveToken or g.type(api.save.GetSaveMetadata)~="function" then return end
@@ -873,7 +883,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.57 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.58 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_SIZE="..g.tostring(current.parkExpansionsTerrainSize or 2048)
         .."\nSEA_RASTER="..g.tostring(nativeSea.ready and 4096 or "unavailable")
         .."\nSEA_RASTER_ERROR="..g.tostring(nativeSea.error)
@@ -899,6 +909,7 @@ function R.Report()
         .."\nHEIGHT_SETUP_ERROR="..g.tostring(current.parkExpansionsHeightError)
         .."\nMANAGED="..g.tostring(s.managed).."\nHEIGHT_TOP="..g.tostring(current.parkExpansionsHeightTop)
         .."\nENABLE_4K_MAP="..g.tostring(settings(current).Enable4KMap)
+        .."\nCONVERT_EXISTING_SAVES="..g.tostring(settings(current).ConvertExistingSaves)
         .."\nMAX_MAP_SIZE="..g.tostring(settings(current).MaxMapSize)
         .."\nRESEARCH_ENABLED="..g.tostring(settings(current).ResearchEnabled)
         .."\nMANUAL_SIZE="..g.tostring(settings(current).ManualParkSize)

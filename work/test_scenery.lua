@@ -6,6 +6,8 @@ function V:new(x,y,z) return {x=x,y=y,z=z,GetX=function(s)return s.x end,GetY=fu
 local groups={{resource="NAT_Tree_Test",instances={{600,20,40,0.5},{-700,32,20,-1}}}}
 local function run(kind)
     local created,placed,commits,cancels,activated,deactivated=0,{},0,0,0,0
+    local cash,unlimited=10000,kind=="sandboxcash"
+    local originalUnlimited=unlimited
     local saveFn,loadFn
     local suspended=0
     local expected=2
@@ -33,6 +35,9 @@ local function run(kind)
         editors={CreateUndoOperationsHierarchy=function()batchSize=0;return hierarchy end},
         park={DeactivateParkEditConstraints=function()deactivated=deactivated+1 end,
             ActivateParkEditConstraints=function()activated=activated+1 end}}
+    w.money={GetCash=function()return cash end,HasUnlimitedCash=function()return unlimited end,
+        SetUnlimitedCash=function(_,value)unlimited=value end,
+        ModifyCash=function(_,amount)cash=cash+amount end}
     api={save={CreateSaveSuspensionControl=function()return {SuspendSave=function()suspended=suspended+1 end,ResumeSave=function()suspended=suspended-1 end}end},
         player={GetGameOwner=function()return 1 end},world={GetWorldAPIs=function()return w end},debug={Trace=function()end},
         entity={FindPrefab=function(name)return kind~="missing" and name=="NAT_Tree_Test_Game" end,
@@ -46,7 +51,13 @@ local function run(kind)
             GetCommitFailReasons=function()
                 return {bUnknown=kind=='pending' and checks<12,bOutsidePark=kind=='rejected' or kind=='mixed',bOutOfBounds=kind=='bounds' or kind=='mixed'}
             end,
-            CommitPreview=function()commits=commits+1;return 4 end,
+            CommitPreview=function()
+                assert(unlimited,"Scenery commit can charge the player")
+                if kind=="commiterror" then error("Simulated native commit failure") end
+                commits=commits+1
+                if kind=="charged" then cash=cash-125 end
+                return 4
+            end,
             CancelPreview=function()cancels=cancels+1;return 5 end,Checkpoint=function()end}}
     require=function(name)
         if name=='NAT_Tree_Test_Game' then return {GetRoot=function()return {}end}end
@@ -71,7 +82,7 @@ local function run(kind)
     end
     if kind=='saved' then loadFn({complete=true,count=2,source=data.source}) end
     restore()
-    if kind=='success' or kind=='batches' or kind=='pending' or kind=='bounds' or kind=='large' then
+    if kind=='success' or kind=='charged' or kind=='sandboxcash' or kind=='batches' or kind=='pending' or kind=='bounds' or kind=='large' then
         assert(commits==math.ceil(expected/128) and created==expected and cancels==0)
         if kind=='bounds' then assert(world.parkExpansionsScenery.boundsBatches==1)end
         assert(placed[1].position.x==(kind=='large' and 1600 or 600) and placed[1].position.y==20 and placed[1].orientation.x==0.5)
@@ -81,6 +92,8 @@ local function run(kind)
         placed[1]=nil
         S.BeforeLoad(world);loadFn(saved);restore()
         assert(created==expected and commits==math.ceil(expected/128) and placed[1]==nil,'Deleted scenery returned after reload')
+    elseif kind=='commiterror' then
+        assert(commits==0 and cancels==1 and world.parkExpansionsScenery.error:find('Simulated native commit failure',1,true))
     elseif kind=='partial' then
         assert(commits==1 and cancels==1 and not world.parkExpansionsScenery.complete)
         local saved={};saveFn(saved)
@@ -94,10 +107,12 @@ local function run(kind)
         assert(world.parkExpansionsScenery.error:find('bOutsidePark=true',1,true),'Native rejection reason missing')end
     assert(activated==deactivated,'Park edit constraints were not restored')
     assert(suspended==0,'Save suspension leaked')
+    assert(unlimited==originalUnlimited,'Original cash mode was not restored')
+    assert(cash==10000,'Scenery charged the player')
     require=nativeRequire;loadfile=nativeLoadfile
     print('PASS scenery '..kind)
 end
-for _,kind in ipairs({'pending','success','saved','invalid','physical','large','missing','bounds','mixed','rejected','partial','batches'})do run(kind)end
+for _,kind in ipairs({'charged','sandboxcash','commiterror','pending','success','saved','invalid','physical','large','missing','bounds','mixed','rejected','partial','batches'})do run(kind)end
 
 local definitions,parts={},{}
 local builder={}

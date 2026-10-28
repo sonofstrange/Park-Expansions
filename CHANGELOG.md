@@ -2,6 +2,22 @@
 
 All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in this file.
 
+## [0.58] - 2026-10-29
+
+### Fixed
+- Save lookup now selects the most recently active local Steam profile first and searches only within that profile. A matching park in another account is no longer used as a fallback.
+- Restoring background scenery in Challenge mode no longer leaves the player charged for imported decorations. The original unlimited-cash setting is restored immediately after the placement call, including when placement fails.
+
+### Added
+- `ConvertExistingSaves` config option to turn automatic existing-save conversion on or off.
+- Windows DLL metadata identifying sonofstrange as the developer, with file and product version 0.58.0.0.
+- Regression tests for profile selection, scenery refunds, and restoration of the original cash mode.
+
+### Known issues
+- Guests can cross the original boundary, but may still get stuck or take detours in expanded areas, including at ride queues.
+- Existing-save conversion remains experimental. Keep a backup before testing.
+- DLL metadata does not guarantee that antivirus software will stop flagging the mod.
+
 ## [0.57] - 2026-10-28
 
 ### Fixed

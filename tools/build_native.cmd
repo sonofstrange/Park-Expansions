@@ -10,7 +10,9 @@ if errorlevel 1 (
   )
 )
 if not exist build mkdir build
-cl /nologo /std:c++17 /EHsc /O2 /MT /I work\compatibility /LD work\compatibility\bridge.cpp work\compatibility\miniz.c /Febuild\ParkExpansionsBridge.dll /Fobuild\ /link /DYNAMICBASE /NXCOMPAT advapi32.lib shell32.lib ole32.lib
+rc /nologo /fo build\version.res work\compatibility\version.rc
+if errorlevel 1 exit /b 1
+cl /nologo /std:c++17 /EHsc /O2 /MT /I work\compatibility /LD work\compatibility\bridge.cpp work\compatibility\miniz.c build\version.res /Febuild\ParkExpansionsBridge.dll /Fobuild\ /link /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT advapi32.lib shell32.lib ole32.lib
 if errorlevel 1 exit /b 1
 cl /nologo /std:c++17 /EHsc /O2 /MT /I work\compatibility /DBRIDGE_TEST work\compatibility\bridge.cpp work\compatibility\miniz.c /Febuild\bridge_test.exe /Fobuild\ /link /DYNAMICBASE /NXCOMPAT advapi32.lib shell32.lib ole32.lib
 if errorlevel 1 exit /b 1

@@ -28,5 +28,6 @@ assert(coroutine.resume(loading))
 assert(coroutine.status(loading)=='dead' and calls==1)
 R.Push();assert(calls==1,"Native loader has not completed yet")
 R.AfterLoad(world,{})
-assert(world.parkExpansionsParkReady and calls==2)
+-- AfterLoad also queries terrain bounds to detect an existing 4K park.
+assert(world.parkExpansionsParkReady and calls>=2)
 print('PASS all HUD callbacks avoid native park access while terrain preparation or native loading is pending')
