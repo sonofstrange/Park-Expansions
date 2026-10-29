@@ -2,6 +2,22 @@
 
 All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in this file.
 
+## [0.60] - 2026-10-29
+
+### Fixed
+- Fixed existing-save conversion selecting a different biome template from the park's original boundary. The reported Mediterranean park could retain its backdrop while receiving Tropical outer terrain and scenery, then fail boundary expansion.
+- The converter now identifies the ParkBoundary type through each save's string table, verifies its original contour, and keeps the source boundary coordinates instead of substituting hardcoded seed coordinates.
+- Added a conversion cache revision so older incorrect cached conversions are not reused. Manual cache deletion is not required.
+- Already-converted parks with a mismatched template now stop before changing the boundary and show instructions to retry from the original pre-conversion backup.
+
+### Validation
+- The bug reporter confirmed the fix in-game.
+- Native tests cover all four stock biome contours, source boundary elevation, save-local type IDs, and rejection of unsupported or malformed contours.
+
+### Notes
+- To retry a previously incorrect conversion, use the original save or its pre-conversion backup. Existing incorrect outer terrain is not automatically rebuilt.
+- Guest pathfinding issues in expanded areas remain under investigation.
+
 ## [0.59] - 2026-10-29
 
 ### Fixed

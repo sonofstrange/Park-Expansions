@@ -22,6 +22,7 @@
 #include "sea_raster.h"
 #include "navigation_bounds.h"
 #include "crowd_grid.h"
+#include "biome_boundary.h"
 #include "miniz.h"
 #include <shlobj.h>
 #include <knownfolders.h>
@@ -1569,26 +1570,6 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
         double seed[3]{};
         double bounds[4]{};
 
-        if (raw_biome == "temperate") {
-            donor_name = "TemperateSandbox";
-            seed[0] = 505.0637512; seed[1] = 46.2103386; seed[2] = 498.8643494;
-            bounds[0] = -500.7930603; bounds[1] = 505.0637512; bounds[2] = -503.9561157; bounds[3] = 503.9422302;
-        } else if (raw_biome == "tropical") {
-            donor_name = "TropicalSandbox";
-            seed[0] = -497.2756653; seed[1] = 6.5644922; seed[2] = 484.7773743;
-            bounds[0] = -499.1105652; bounds[1] = 509.4645386; bounds[2] = -504.4102783; bounds[3] = 499.5578918;
-        } else if (raw_biome == "taiga") {
-            donor_name = "TaigaSandbox";
-            seed[0] = -486.1791382; seed[1] = 76.1536713; seed[2] = -486.6044006;
-            bounds[0] = -502.7882690; bounds[1] = 510.9080811; bounds[2] = -511.0911560; bounds[3] = 413.6222229;
-        } else if (raw_biome == "mediterranean") {
-            donor_name = "MediterraneanSandbox";
-            seed[0] = -506.6679993; seed[1] = 10.1644068; seed[2] = -502.8905640;
-            bounds[0] = -510.1216431; bounds[1] = 488.7711792; bounds[2] = -507.6991882; bounds[3] = 510.1072693;
-        } else {
-            fail("Unsupported biome: " + raw_biome);
-            return;
-        }
 
         progress(15, "Checking the selected save");
         auto file_bytes = read_file(save_path);
@@ -1597,7 +1578,8 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
             return;
         }
         std::string source_hash = sha256_hex_from_raw(sha256_raw(file_bytes.data(), file_bytes.size()).data(), 32);
-        fs::path native_file = cache / (wide(source_hash.c_str()) + L".bin");
+        fs::path native_file;
+        std::string conversion_hash;
 
         std::string clean_name;
         for (char c : park_name) {
@@ -1611,22 +1593,16 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
             snprintf(res, sizeof(res),
                 "return {status=\"ready\",progress=100,message=\"Conversion verified. Loading the expanded copy.\",\n"
                 "native=\"/run/Win64/ovldata/Mod_BoundaryLab/AutoConversion/%s.bin\",\n"
-                "info={version=1,filename=\"%s.bin\",terrainSize=2048,\n"
+                "info={version=1,conversionVersion=2,biomeSource=\"boundary\",filename=\"%s.bin\",terrainSize=2048,\n"
                 "seed={%.7f,%.7f,%.7f},\n"
                 "bounds={%.7f,%.7f,%.7f,%.7f},\n"
                 "sourceHash=\"%s\",sourceName=\"%s\"}}\n",
-                source_hash.c_str(), donor_name.c_str(),
+                conversion_hash.c_str(), donor_name.c_str(),
                 seed[0], seed[1], seed[2],
                 bounds[0], bounds[1], bounds[2], bounds[3],
                 source_hash.c_str(), clean_name.c_str());
             atomicWrite(cache / ("Result-" + nonce + ".lua"), res);
         };
-
-        if (fs::exists(native_file) && fs::file_size(native_file) > 100) {
-            progress(95, "Loaded cached conversion");
-            finish_ready();
-            return;
-        }
 
         // Frontier .park2 saves write cd_size=0 in EOCD. Patch it in memory so standard zip readers parse the central directory.
         if (file_bytes.size() >= 22) {
@@ -1702,6 +1678,24 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
 
         progress(25, "Checking terrain storage and park boundaries");
         auto info = parse_clients(body_vec);
+        auto boundaryBlock=std::find_if(info.blocks.begin(),info.blocks.end(),[](const ClientBlock& block){return block.name=="Boundary";});
+        if(boundaryBlock==info.blocks.end())throw std::runtime_error("Source boundary client is missing");
+        const auto detected=detectBoundaryBiome(body_vec.data()+boundaryBlock->name_end,boundaryBlock->end-boundaryBlock->name_end,parkBoundaryTypeIndex(body_vec));
+        donor_name=detected.donor;
+        std::copy(detected.seed,detected.seed+3,seed);std::copy(detected.bounds,detected.bounds+4,bounds);
+        bridgeDebug("Conversion biome: metadata=%s contour=%s donor=%s",raw_biome.c_str(),detected.biome,detected.donor);
+        raw_biome=detected.biome;
+        // Old cache entries may contain the wrong donor; never reuse those files.
+        const std::string cacheIdentity=source_hash+":boundary-v2:"+donor_name;
+        conversion_hash=sha256_hex_from_raw(sha256_raw(reinterpret_cast<const uint8_t*>(cacheIdentity.data()),cacheIdentity.size()).data(),32);
+        native_file=cache/(wide(conversion_hash.c_str())+L".bin");
+        if (fs::exists(native_file) && fs::file_size(native_file) > 100) {
+            progress(95, "Loaded cached conversion");
+            finish_ready();
+            return;
+        }
+
+
         int vt_idx = -1;
         for (size_t i = 0; i < info.blocks.size(); ++i) {
             if (info.blocks[i].name == "VoxelTerrain") {
@@ -2017,6 +2011,17 @@ extern "C" __declspec(dllexport) int TestFindSave(const wchar_t* base,const char
     if(path.size()+1>capacity) return -1;
     std::copy(path.begin(),path.end(),output);output[path.size()]=0;
     return path.empty()?0:1;
+}
+extern "C" __declspec(dllexport) int TestParkBoundaryType(const uint8_t* data,size_t length) {
+    try{return int(parkBoundaryTypeIndex(std::vector<uint8_t>(data,data+length)));}catch(const std::exception&){return -1;}
+}
+extern "C" __declspec(dllexport) int TestBoundaryBiome(const uint8_t* data,size_t length,double* output,uint32_t parkType) {
+    try {
+        const auto result=detectBoundaryBiome(data,length,parkType);
+        std::copy(result.seed,result.seed+3,output);std::copy(result.bounds,result.bounds+4,output+3);
+        for(int i=0;i<4;++i)if(std::strcmp(result.biome,stockBoundaryBiomes[i].biome)==0)return i;
+    } catch(const std::exception&) {}
+    return -1;
 }
 static uintptr_t testNativeFault=0;
 static LONG recordTestNativeFault(EXCEPTION_POINTERS* info) {

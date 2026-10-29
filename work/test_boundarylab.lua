@@ -190,7 +190,7 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
         if module=="Helpers.PopUpDialogUtils" then
             return {RunOKDialog=function(_,message)
                 popupCount=popupCount+1
-                assert(clipboardReport and clipboardReport:find("Park Expansions 0.59 report",1,true),"Missing clipboard report")
+                assert(clipboardReport and clipboardReport:find("Park Expansions 0.60 report",1,true),"Missing clipboard report")
                 assert(clipboardReport:find("CONNECTED posts="..#posts.." panels="..#panels,1,true),"Missing contour diagnosis")
                 if not allowCommit then assert(message:find("outsideBounds=true",1,true),"Lost rejection details") end
                 if controlAccepted then assert(message:find("Unchanged contour: accepted",1,true),"Lost control result") end
@@ -209,6 +209,12 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
     local self={parkExpansionsTerrainSize=widthRun and widthRun.size or 2048,boundaryLabTerrainCreated=parkName~="Saved Park",
         boundaryLabTemplate=template, boundaryLabExpectedBounds=widthRun and bounds or nil,
         boundaryLabActiveSeed=widthRun and seedPoint or nil}
+    if widthRun and widthRun.wrongTemplate then
+        self.boundaryLabTemplate=biomes["tropicalsandbox.bin"]
+        self.boundaryLabExpectedBounds=self.boundaryLabTemplate.bounds
+        self.boundaryLabActiveSeed=seedPoint
+        self.parkExpansionsConverted={filename="TropicalSandbox.bin"}
+    end
     if widthRun and widthRun.manual then
         local operation
         for i=1,40 do
@@ -222,7 +228,11 @@ local function test(name, parkName, allowCommit, mode, pendingKind, controlAccep
     end
     for _=1,15000 do worldClass.OnAdvance(self,1/60) end
     clipboardReport=clipboardReport or self.boundaryLabReport
-    if widthRun and widthRun.outsideTerrain then
+    if widthRun and widthRun.wrongTemplate then
+        assert(committed==0 and previewCount==0 and popupCount==1)
+        assert(clipboardReport:find("mediterraneansandbox.bin",1,true),"Missing actual boundary biome")
+        assert(clipboardReport:find("pre-conversion backup",1,true),"Missing safe recovery instruction")
+    elseif widthRun and widthRun.outsideTerrain then
         assert(committed==0 and previewCount==0 and popupCount==1)
         assert(clipboardReport:find("configured size was not clamped or applied",1,true))
     elseif parkName=="Saved Park" then
@@ -352,3 +362,5 @@ local largeWidths={1152,1344,1536,1792,2040,3072,4088}
 for i,width in ipairs(largeWidths) do
  test("4K research boundary -> "..width,"My test",true,nil,nil,nil,nil,nil,"taigasandbox.bin",nil,"rectangle",{from=i==1 and 0 or largeWidths[i-1],to=width,size=4096})
 end
+
+test("legacy conversion with wrong donor stops safely before editing", "Mythara_0.1",true,nil,nil,nil,nil,nil,"mediterraneansandbox.bin",nil,"rectangle",{from=0,to=1152,wrongTemplate=true})

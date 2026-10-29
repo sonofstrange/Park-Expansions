@@ -18,7 +18,7 @@ Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open
 
 ## Compatibility
 
-Release version **0.59**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. The native bridge is gated to game build **1.11.3.986758F**. Existing-save support is experimental; older conversion paths are not comprehensively validated in this release. Career, Franchise and Workshop-only saves are not supported by the converter.
+Release version **0.60**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. The native bridge is gated to game build **1.11.3.986758F**. Existing-save support is experimental; older conversion paths are not comprehensively validated in this release. Career, Franchise and Workshop-only saves are not supported by the converter.
 
 The maximum buildable width is 2040 m on standard 2K maps and 4088 m on 4K maps, leaving a 4 m safety margin at each terrain edge.
 
@@ -41,7 +41,9 @@ Each branch costs 12,500 / 25,000 / 50,000 / 100,000 / 200,000 research points. 
 
 ## Experimental
 
-**Known issue in 0.59:** guests can cross the original map boundary, but pathfinding in expanded areas may still be unreliable. Further investigation is ongoing.
+**Known issue in 0.60:** guests can cross the original map boundary, but pathfinding in expanded areas may still be unreliable. Further investigation is ongoing.
+
+**Conversion fix in 0.60:** The converter now verifies the original park boundary before selecting its terrain and scenery template. Older conversion caches are bypassed automatically; manual cache deletion is not required. To retry an incorrectly converted park, load the original save or its pre-conversion backup. This release does not rebuild the outer terrain of an already-saved incorrect conversion.
 
 **Undo history:** A successful park boundary expansion resets undo and redo history. Earlier construction edits can no longer be undone; construction performed after expansion can be undone normally. Failed expansion attempts leave history unchanged.
 

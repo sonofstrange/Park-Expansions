@@ -525,6 +525,7 @@ function R.InstallCompatibilityHooks()
                 local template=world.boundaryLabTemplate
                 metadata.tSave.parkExpansions={version=1,filename=s.filename,terrainSize=world.parkExpansionsTerrainSize or 2048,
                     seed=s.seed or (template and template.seed),bounds=s.bounds or (template and template.bounds),
+                    conversionVersion=converted and converted.conversionVersion,biomeSource=converted and converted.biomeSource,
                     sourceHash=converted and converted.sourceHash,sourceName=converted and converted.sourceName}
             end
             return metadata
@@ -883,7 +884,7 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.59 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.60 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_SIZE="..g.tostring(current.parkExpansionsTerrainSize or 2048)
         .."\nSEA_RASTER="..g.tostring(nativeSea.ready and 4096 or "unavailable")
         .."\nSEA_RASTER_ERROR="..g.tostring(nativeSea.error)
@@ -903,6 +904,8 @@ function R.Report()
         .."\nAUTO_CONVERSION="..g.tostring(current.parkExpansionsAutoStatus)
         .."\nAUTO_CONVERSION_ERROR="..g.tostring(current.parkExpansionsAutoError)
         .."\nSOURCE_TEMPLATE="..g.tostring(s.filename)
+        .."\nCONVERSION_VERSION="..g.tostring(current.parkExpansionsConverted and current.parkExpansionsConverted.conversionVersion)
+        .."\nCONVERSION_BIOME_SOURCE="..g.tostring(current.parkExpansionsConverted and current.parkExpansionsConverted.biomeSource)
         .."\nUNSUPPORTED_REASON="..g.tostring(current.parkExpansionsUnsupportedReason)
         .."\nHEIGHT_CONSTRAINT=invisible ceiling exclusion box"
         .."\nHEIGHT_VOLUME="..g.tostring(current.parkExpansionsHeightEntity)
