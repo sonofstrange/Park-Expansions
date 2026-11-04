@@ -11,15 +11,16 @@ local function run(kind)
     local saveFn,loadFn
     local suspended=0
     local expected=2
-    if kind=="batches" or kind=="partial" then
+    if kind=="batches" or kind=="partial" or kind=="half" or kind=="halfpartial" then
         groups={{resource="NAT_Tree_Test",instances={}}}
         for i=1,260 do groups[1].instances[i]={600,20,40,0.5} end
         expected=260
     end
+    if kind=="half" or kind=="halfpartial" then expected=130 end
     local data={version=1,source=string.rep('a',64),groups=groups}
     if kind=='physical' then data={version=1,source=string.rep('a',64),groups={{resource='NAT_Tree_Test',instances={{600,3000,40,0}}}}} end
     if kind=='invalid' then data={version=1,source=string.rep('a',64),groups={{resource='NAT_Tree_Test',instances={{1,20,1,0}}}}} end
-    local world={parkExpansionsTerrainSize=kind=='large' and 4096 or 2048,boundaryLabTerrainCreated=true,boundaryLabFilename='TaigaSandbox.bin'}
+    local world={parkExpansionsConfig={SceneryMode="Editable",EditableSceneryPercent=(kind=="half" or kind=="halfpartial") and 50 or 100},parkExpansionsTerrainSize=kind=='large' and 4096 or 2048,boundaryLabTerrainCreated=true,boundaryLabFilename='TaigaSandbox.bin'}
     if kind=='large' then data.groups={{resource='NAT_Tree_Test',instances={{1600,20,40,0.5},{-1800,32,20,-1}}}}end
     local batchSize=0
     local previews=0
@@ -45,7 +46,7 @@ local function run(kind)
         undo={IsBusy=function()return false end,PreviewChangeList=function()previews=previews+1;return 2,3 end,IsOperationComplete=function()return true end,
             CanCommitPreview=function()
                 checks=checks+1
-                return kind~='rejected' and kind~='bounds' and kind~='mixed' and not(kind=='partial' and previews==2) and
+                return kind~='rejected' and kind~='bounds' and kind~='mixed' and not((kind=='partial' or kind=='halfpartial') and previews==2) and
                     not(kind=='pending' and checks<12)
             end,
             GetCommitFailReasons=function()
@@ -82,7 +83,7 @@ local function run(kind)
     end
     if kind=='saved' then loadFn({complete=true,count=2,source=data.source}) end
     restore()
-    if kind=='success' or kind=='charged' or kind=='sandboxcash' or kind=='batches' or kind=='pending' or kind=='bounds' or kind=='large' then
+    if kind=='success' or kind=='charged' or kind=='sandboxcash' or kind=='batches' or kind=='pending' or kind=='bounds' or kind=='large' or kind=='half' then
         assert(commits==math.ceil(expected/128) and created==expected and cancels==0)
         if kind=='bounds' then assert(world.parkExpansionsScenery.boundsBatches==1)end
         assert(placed[1].position.x==(kind=='large' and 1600 or 600) and placed[1].position.y==20 and placed[1].orientation.x==0.5)
@@ -94,13 +95,14 @@ local function run(kind)
         assert(created==expected and commits==math.ceil(expected/128) and placed[1]==nil,'Deleted scenery returned after reload')
     elseif kind=='commiterror' then
         assert(commits==0 and cancels==1 and world.parkExpansionsScenery.error:find('Simulated native commit failure',1,true))
-    elseif kind=='partial' then
+    elseif kind=='partial' or kind=='halfpartial' then
         assert(commits==1 and cancels==1 and not world.parkExpansionsScenery.complete)
         local saved={};saveFn(saved)
         assert(saved.nextIndex==129 and saved.count==128)
+        world.parkExpansionsConfig.EditableSceneryPercent=100
         S.BeforeLoad(world);loadFn(saved);restore()
-        assert(commits==3 and created==388 and world.parkExpansionsScenery.complete)
-        assert(world.parkExpansionsScenery.count==260,'Incomplete import did not resume at committed cursor')
+        assert(commits==(kind=="halfpartial" and 2 or 3) and created==(kind=="halfpartial" and 132 or 388) and world.parkExpansionsScenery.complete)
+        assert(world.parkExpansionsScenery.count==expected,'Incomplete import did not resume at committed cursor')
     elseif kind=='saved' then assert(created==0 and commits==0)
     elseif kind=='invalid' or kind=='missing' or kind=='physical' then assert(created==0 and commits==0 and world.parkExpansionsScenery.error)
     else assert(commits==0 and cancels==1 and not world.parkExpansionsScenery.complete)
@@ -112,7 +114,7 @@ local function run(kind)
     require=nativeRequire;loadfile=nativeLoadfile
     print('PASS scenery '..kind)
 end
-for _,kind in ipairs({'charged','sandboxcash','commiterror','pending','success','saved','invalid','physical','large','missing','bounds','mixed','rejected','partial','batches'})do run(kind)end
+for _,kind in ipairs({'charged','sandboxcash','commiterror','pending','success','saved','invalid','physical','large','missing','bounds','mixed','rejected','partial','batches','half','halfpartial'})do run(kind)end
 
 local definitions,parts={},{}
 local builder={}

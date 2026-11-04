@@ -104,12 +104,15 @@ function S.BeforeLoad(world)
     serial:RegisterWorldSerialisationClient("ParkExpansionsScenery",1,
         function(save)
             local state=world.parkExpansionsScenery
-            save.complete=state.complete;save.count=state.count;save.source=state.source;save.nextIndex=state.nextIndex
+            -- Only editable parts are owned by native save clients. Background entities
+            -- are transient and must be recreated on each load.
+            save.complete=state.mode~="Background" and state.mode~="None" and state.complete or false
+            save.count=state.count;save.source=state.source;save.nextIndex=state.nextIndex;save.mode=state.mode;save.density=state.density
         end,
         function(load)
             if load and (load.complete==true or load.nextIndex) then
                 world.parkExpansionsScenery={complete=load.complete==true,count=load.count or 0,
-                    source=load.source,nextIndex=load.nextIndex}
+                    source=load.source,nextIndex=load.nextIndex,mode="Editable",density=load.density or 100}
             end
             return true
         end,
@@ -181,8 +184,83 @@ local function rejectionDetails(reasons)
     return #active>0 and g.table.concat(active,", ") or "no active reason flags reported"
 end
 
+local function selectMode(world)
+    local state=world.parkExpansionsScenery
+    if not state then return end
+    local requested=(world.parkExpansionsConfig or {}).SceneryMode or "Editable"
+    -- Old saves did not retain entity IDs. Never delete player scenery or add
+    -- duplicate background models over a complete/partly committed import.
+    if state.complete or (state.count or 0)>0 or (state.nextIndex or 1)>1 then
+        if state.mode==nil or state.mode=="Editable" then
+            state.mode="Editable"
+            if requested~="Editable" then
+                state.modeWarning="This save already contains imported editable scenery. The configured mode applies to parks without an editable import."
+            end
+            return
+        end
+    end
+    state.mode=requested
+end
+
+-- Stable thinning across the original placement order; no RNG or cache edits.
+function S.SelectEditablePlacements(data,percent)
+    local placements={}
+    local index=0
+    for _,group in g.ipairs(data.groups) do
+        for _,row in g.ipairs(group.instances) do
+            index=index+1
+            if g.math.floor(index*percent/100)>g.math.floor((index-1)*percent/100) then
+                placements[#placements+1]={resource=group.resource,row=row}
+            end
+        end
+    end
+    return placements
+end
+
+local function destroyBackground(world)
+    for _,id in g.ipairs(world.parkExpansionsBackgroundEntities or {}) do
+        api.entity.DestroyEntity(id)
+    end
+    world.parkExpansionsBackgroundEntities=nil
+end
+
+local function restoreBackground(world,data,progress)
+    local Vector3=g.require("Vector3")
+    local TransformQ=g.require("TransformQ")
+    local Quaternion=g.require("Quaternion")
+    world.parkExpansionsBackgroundEntities={}
+    local entities=world.parkExpansionsBackgroundEntities
+    local count=0
+    for _,group in g.ipairs(data.groups) do count=count+#group.instances end
+    local done=0
+    for _,group in g.ipairs(data.groups) do
+        -- Use the game's backdrop prefab, never its _Game counterpart:
+        -- BaseTree_Skirt contains rendering/transform components only.
+        local resource=group.resource:gsub("^PE_","")
+        local prefab=resource.."_Skirt"
+        if not ensureCompiled(prefab) then prefab=resource.."_SkirtNoShadow" end
+        g.assert(ensureCompiled(prefab),"Background prefab is unavailable: "..resource)
+        for first=1,#group.instances,128 do
+            local token=api.entity.CreateRequestCompletionToken()
+            for index=first,g.math.min(first+127,#group.instances) do
+                local row=group.instances[index]
+                local transform=TransformQ.FromOrPos(Quaternion.FromYawPitchRoll(Vector3:new(row[4],0,0)),
+                    Vector3:new(row[1],row[2],row[3]))
+                local id=api.entity.InstantiatePrefab(prefab,"ParkExpansionsBackground",token,transform)
+                g.assert(id,"Could not create background scenery")
+                entities[#entities+1]=id
+                done=done+1
+            end
+            wait(function()return api.entity.HaveRequestsCompleted(token)end,"Background assets did not finish loading")
+            progress(true,g.math.floor(done*100/g.math.max(count,1)),"Loading background: "..done.."/"..count)
+            g.coroutine.yield()
+        end
+    end
+    world.parkExpansionsScenery.backgroundCount=done
+end
+
 function S.AfterLoad(world,progress)
-    S.AddPrefabs()
+    selectMode(world)
     local state=world.parkExpansionsScenery
     if not state or state.complete then return end
     local research=world.boundaryLabResearch or {}
@@ -194,6 +272,11 @@ function S.AfterLoad(world,progress)
     local a,b=w.voxelterrain:GetWorldBounds(w.voxelterrain:GetPrimaryVoxelTerrainEntityID())
     local half=(world.parkExpansionsTerrainSize or 2048)/2
     if a:GetX()~=-half or a:GetZ()~=-half or b:GetX()~=half-1 or b:GetZ()~=half-1 then return end
+    if state.mode=="None" then
+        state.complete=true
+        progress(false,100,"")
+        return
+    end
     local preview,changedConstraints,saveControl
     local ok,message=g.pcall(function()
         local chunk=g.assert(g.loadfile("Win64/ovldata/Mod_BoundaryLab/"..(half==2048 and "Maps4096" or "Maps").."/"..
@@ -206,10 +289,20 @@ function S.AfterLoad(world,progress)
                     and row[3]>=a:GetZ() and row[3]<=b:GetZ(),"Original scenery exceeds the physical terrain volume")
             end
         end
+        if state.mode=="Background" then
+            restoreBackground(world,data,progress)
+            state.complete=true;state.source=data.source
+            return
+        end
+        S.AddPrefabs()
         local Vector3=g.require("Vector3")
         local TransformQ=g.require("TransformQ")
         local Quaternion=g.require("Quaternion")
-        local placements={}
+        -- Continue a partial import using its original density. Legacy saves
+        -- used 100%; changing config must not shift their continuation cursor.
+        state.density=state.density or (world.parkExpansionsConfig or {}).EditableSceneryPercent or 50
+        local placements=S.SelectEditablePlacements(data,state.density)
+        count=#placements
         for _,group in g.ipairs(data.groups) do
             local gameplay=group.resource.."_Game"
             local available=ensureCompiled(gameplay)
@@ -229,9 +322,6 @@ function S.AfterLoad(world,progress)
                         break
                     end
                 end
-            end
-            for _,row in g.ipairs(group.instances) do
-                placements[#placements+1]={resource=group.resource,row=row}
             end
         end
         local cursor=state.nextIndex or 1
@@ -334,7 +424,7 @@ function S.AfterLoad(world,progress)
     world.parkExpansionsSceneryPreview=nil
     if changedConstraints then w.park:ActivateParkEditConstraints() end
     world.parkExpansionsSceneryConstraints=nil
-    if w then
+    if changedConstraints and w then
         if w.scenery_editconstraint and g.type(w.scenery_editconstraint.ClearEditConstraintsForAllParts)=="function" then
             g.pcall(w.scenery_editconstraint.ClearEditConstraintsForAllParts,w.scenery_editconstraint)
         end
@@ -351,6 +441,7 @@ function S.AfterLoad(world,progress)
     if saveControl then saveControl:ResumeSave() end
     world.parkExpansionsScenerySaveControl=nil
     if not ok then
+        if state.mode=="Background" then destroyBackground(world);state.backgroundCount=0 end
         state.error=g.tostring(message)
         api.debug.Trace("Park Expansions scenery: "..state.error)
     end
@@ -360,6 +451,7 @@ end
 -- OnLoad registers the save client only. Match the game's default spawn-point
 -- placement: create objects from OnAdvance after OnActivate has completed.
 function S.Queue(world)
+    selectMode(world)
     if world.parkExpansionsScenery and not world.parkExpansionsScenery.complete then
         world.parkExpansionsSceneryPending=true
     end
@@ -387,6 +479,7 @@ function S.Advance(world,progress)
 end
 
 function S.Shutdown(world)
+    destroyBackground(world)
     world.parkExpansionsSceneryPending=nil
     world.parkExpansionsSceneryTask=nil
     if world.parkExpansionsSceneryPreview then

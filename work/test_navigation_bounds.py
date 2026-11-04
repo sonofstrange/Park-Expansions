@@ -5,9 +5,10 @@ import ctypes, struct
 from pathlib import Path
 import pefile, capstone
 pe=pefile.PE(r'D:\SteamLibrary\steamapps\common\Planet Coaster 2\PlanetCoaster2.exe',fast_load=True)
-assert pe.FILE_HEADER.TimeDateStamp==0x6abfabee
+from native_test_build import identify,select,rva as game_rva
+updated=identify(pe)
 md=capstone.Cs(capstone.CS_ARCH_X86,capstone.CS_MODE_64);md.detail=True
-begin,end=0x164c500,0x164c7f5
+begin,end=game_rva(0x164c500),game_rva(0x164c7f5)
 stock=pe.get_data(begin,end-begin)
 instructions=list(md.disasm(stock,begin))
 assert not any(i.mnemonic=='call' for i in instructions), 'Only test the self-contained initializer'
@@ -25,7 +26,7 @@ for ins in instructions:
    assert 0<=rva<size-16
    ctypes.memmove(image+rva,pe.get_data(rva,16),16)
 old=ctypes.c_uint32()
-assert k.VirtualProtect(image+0x164c000,4096,0x20,ctypes.byref(old))
+assert k.VirtualProtect(image+game_rva(0x164c000),4096,0x20,ctypes.byref(old))
 initialize=ctypes.WINFUNCTYPE(None,ctypes.c_void_p)(image+begin)
 manager=ctypes.create_string_buffer(0x1000)
 def values():
@@ -36,13 +37,14 @@ bounds,tiles,cells,budget=values()
 assert bounds==(-512,)*3+(512,)*3 and tiles==(128,128) and cells==(4096,4096)
 print('PASS actual stock initializer: bounds +/-512, tiles 128 x 128, cell grid 4096 x 4096, Detour budget',budget)
 dll=ctypes.CDLL(str(Path('build/bridge_contract.dll').resolve()))
+select(dll,pe)
 backward=dll.TestNavigationBackwardAllocation;backward.argtypes=[];backward.restype=ctypes.c_int
 assert backward()==1, 'An unavailable forward window must fall back to an allocation below the anchor'
 print('PASS forward address window unavailable: backward RIP allocation succeeds')
 configure=dll.TestNavigationBounds;configure.argtypes=[ctypes.c_void_p,ctypes.c_size_t];configure.restype=ctypes.c_int
 assert configure(image,100)==0
 # Fingerprint mismatch must fail without modifying either instruction.
-assert k.VirtualProtect(image+0x164c000,4096,0x40,ctypes.byref(old))
+assert k.VirtualProtect(image+game_rva(0x164c000),4096,0x40,ctypes.byref(old))
 ctypes.c_ubyte.from_address(image+begin+2).value^=1
 before=ctypes.string_at(image+begin,len(stock))
 assert configure(image,size)==0 and ctypes.string_at(image+begin,len(stock))==before
@@ -58,9 +60,9 @@ for _ in range(3):
 print('PASS actual patched initializer: bounds +/-2048, tiles 512 x 512, unchanged Detour budget; repeated world creation')
 # Only displacements of the two bounds loads may change; shared game constants stay intact.
 changed={i for i,(a,b) in enumerate(zip(stock,patched)) if a!=b}
-allowed={r-begin+n for r in (0x164c50c,0x164c518) for n in range(3,7)}
+allowed={r-begin+n for r in (game_rva(0x164c50c),game_rva(0x164c518)) for n in range(3,7)}
 assert changed and changed<=allowed
-for rva in (0x30de520,0x30ddfc0):
+for rva in (game_rva(0x30de520),game_rva(0x30ddfc0)):
  assert ctypes.string_at(image+rva,16)==pe.get_data(rva,16)
 print('PASS exact code guard, no partial writes, idempotence, only two RIP operands changed, original constants retained')
 k.VirtualFree(image,0,0x8000)

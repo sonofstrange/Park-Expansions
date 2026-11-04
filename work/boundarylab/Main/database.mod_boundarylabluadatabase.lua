@@ -1,4 +1,4 @@
--- Park Expansions 0.60: extends copied voxel storage; original terrain is retained.
+-- Park Expansions 0.63: extends copied voxel storage; original terrain is retained.
 local g = _G
 local api = g.api
 local M = {}
@@ -178,7 +178,7 @@ end
 
 local function notice(message)
     log(message)
-    local report = "Park Expansions 0.60 report\n" .. g.table.concat(reportLines,"\n")
+    local report = "Park Expansions 0.63 report\n" .. g.table.concat(reportLines,"\n")
     local copied,result = g.pcall(function()
         return api.world.GetWorldAPIs().editors:CopyToClipboard(report)
     end)
@@ -186,7 +186,7 @@ local function notice(message)
         and "\n\nReport copied to clipboard. Paste it in chat with Ctrl+V."
         or "\n\nClipboard unavailable. Short result: " .. g.tostring(M.lastCode or "BL22-ERROR")
     g.require("Helpers.PopUpDialogUtils").RunOKDialog(
-        "[STRING_LITERAL:Value=|Park Expansions 0.60|]",
+        "[STRING_LITERAL:Value=|Park Expansions 0.63|]",
         "[STRING_LITERAL:Value=|" .. message .. hint .. "|]")
 end
 
@@ -274,7 +274,7 @@ end
 local function expand(self,requestedWidth,allowShrink)
     reportLines = {}
     M.lastCode = "BL22-ERROR"
-    log("RUN Park Expansions 0.60")
+    log("RUN Park Expansions 0.63")
     for _,line in g.ipairs(self.boundaryLabLoadLines or {}) do log(line) end
     local cfg = {}
     local chunk, err = g.loadfile("Win64/ovldata/Mod_BoundaryLab/Config.ini", "t", cfg)
@@ -811,7 +811,7 @@ local function expand(self,requestedWidth,allowShrink)
     end
     M.lastCode = "BL22-COMMIT-OK"
     Research.Progress(self,100,"Park expanded.")
-    self.boundaryLabReport="Park Expansions 0.60 report\n"..g.table.concat(reportLines,"\n")
+    self.boundaryLabReport="Park Expansions 0.63 report\n"..g.table.concat(reportLines,"\n")
     if requestedWidth then return end
     notice((cfg.Shape == "rectangle" and "COMMIT COMPLETE - rectangle " .. rectangleHalf*2 .. " x " .. rectangleHalf*2 .. " m"
         or "COMMIT COMPLETE - contour scaled by " .. cfg.Factor)
@@ -823,7 +823,7 @@ function M.AddContentToCall(list)
     g.table.insert(list, M)
 end
 
-function M.Init() Research.Init();Research.InstallHeightMarkerFix();Research.InstallCompatibilityHooks();Research.InstallCaptureGridFix();Research.InstallCameraZoomFix() end
+function M.Init() Research.Init();Research.InstallHeightMarkerFix();Research.InstallCompatibilityHooks();Research.InstallCaptureGridFix();Research.InstallCameraZoomFix();Research.InstallAdvancedMoveFix() end
 
 function M.AddLuaPrefabs(add) Scenery.AddPrefabs(add) end
 function M.InsertToDBs() Scenery.Init() end
@@ -868,7 +868,9 @@ function M.AddLuaHooks(add)
             original(self, dt)
             if Scenery.Advance(self,function(active,percent,message)
                 Research.Progress(self,percent,active and message or
-                    (self.parkExpansionsScenery.error and "Scenery restoration failed." or "Original scenery restored."))
+                    (self.parkExpansionsScenery.error and "Scenery restoration failed." or
+                        self.parkExpansionsScenery.mode=="None" and "Background scenery disabled." or
+                        self.parkExpansionsScenery.mode=="Background" and "Background scenery loaded." or "Original scenery restored."))
             end) then return end
             if self.boundaryLabTask then
                 local ok,message = g.coroutine.resume(self.boundaryLabTask)
@@ -910,5 +912,5 @@ function M.AddLuaHooks(add)
     end)
 end
 
-log("DATABASE LOADED - Park Expansions 0.60 experimental expansion")
+log("DATABASE LOADED - Park Expansions 0.63 experimental expansion")
 return M

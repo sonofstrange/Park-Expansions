@@ -19,10 +19,12 @@
 #include <functional>
 #include <atomic>
 #include <cstdarg>
+#include "game_build.h"
 #include "sea_raster.h"
 #include "navigation_bounds.h"
 #include "crowd_grid.h"
 #include "biome_boundary.h"
+#include "culling_rehash.h"
 #include "miniz.h"
 #include <shlobj.h>
 #include <knownfolders.h>
@@ -55,7 +57,12 @@ static void bridgeDebug(const char* format,...) {
 
 typedef bool (__fastcall *IsPositionWithinParkBoundary_t)(void* rcx, const float* pos, bool r8b);
 static IsPositionWithinParkBoundary_t original_IsPositionWithinParkBoundary = nullptr;
-static std::atomic<float> g_expanded_half_size{ 2050.0f };
+static std::atomic<float> g_expanded_half_size{ 0.0f };
+static bool setExpandedBoundarySize(float size) {
+    if(!std::isfinite(size)||(size!=0&&size<=100))return false;
+    g_expanded_half_size.store(size==0?0:size*0.5f+10.0f,std::memory_order_relaxed);
+    return true;
+}
 static bool g_boundary_hook_installed = false;
 
 static bool __fastcall Hooked_IsPositionWithinParkBoundary(void* rcx, const float* pos, bool r8b) {
@@ -67,7 +74,7 @@ static bool __fastcall Hooked_IsPositionWithinParkBoundary(void* rcx, const floa
         float y = pos[1];
         float z = pos[2];
         float half = g_expanded_half_size.load(std::memory_order_relaxed);
-        if (x >= -half && x <= half && z >= -half && z <= half && y >= -2304.0f && y <= 2304.0f) {
+        if (half > 0 && x >= -half && x <= half && z >= -half && z <= half && y >= -2304.0f && y <= 2304.0f) {
             expanded=true;
         }
     }
@@ -80,7 +87,7 @@ static bool __fastcall Hooked_IsPositionWithinParkBoundary(void* rcx, const floa
 
 static bool installBoundaryHook(unsigned char* base, size_t size, std::string& error) {
     if (g_boundary_hook_installed) return true;
-    const uint32_t rva = 0xdf4430;
+    const uint32_t rva = updatedGameBuild?0xe48550:0xdf4430;
     if (rva + 16 > size) {
         error = "Boundary hook RVA out of range.";
         return false;
@@ -234,7 +241,7 @@ static bool supportedGame() {
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
     auto pe = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
     return pe->Signature == IMAGE_NT_SIGNATURE && pe->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64
-        && pe->FileHeader.TimeDateStamp == 0x6abfabee && pe->OptionalHeader.SizeOfImage == 0x130a4000;
+        && selectGameBuild(pe->FileHeader.TimeDateStamp,pe->OptionalHeader.SizeOfImage);
 }
 
 static std::wstring wide(const char* source) {
@@ -1333,96 +1340,75 @@ static std::string narrow(const std::wstring& source) {
     return result;
 }
 
-static fs::path find_save_in_profiles(const fs::path& base, const std::string& save_id, const std::string& park_name) {
+// api.save.GetSaveIdentifier hashes the save token's filename using DJB2
+// (5381, multiply by 33, signed UTF-8 bytes), not the hexadecimal filename
+// suffix. Verified in the 1.12.2 Lua binding and against a recorded game ID.
+static uint32_t saveFilenameIdentifier(const std::string& filename) {
+    uint32_t hash=5381;
+    for(unsigned char byte:filename)hash=hash*33+static_cast<int8_t>(byte);
+    return hash;
+}
+// Read the account from the Steam API already initialized by the game.
+// Do not load/initialize Steam ourselves or infer the account from file dates.
+static uint64_t currentSteamAccount() {
+    __try {
+        const auto module=GetModuleHandleW(L"steam_api64.dll");
+        if(!module)return 0;
+        using SteamUser=void*(__cdecl*)();
+        using SteamID=uint64_t(__cdecl*)(void*);
+        const auto user=reinterpret_cast<SteamUser>(GetProcAddress(module,"SteamAPI_SteamUser_v021"));
+        const auto id=reinterpret_cast<SteamID>(GetProcAddress(module,"SteamAPI_ISteamUser_GetSteamID"));
+        if(!user||!id)return 0;
+        void* instance=user();
+        return instance?id(instance):0;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return 0;}
+}
+static fs::path find_save_in_profiles(const fs::path& base, const std::string& save_id, const std::string& park_name, const std::string& selected_account={}) {
+    (void)park_name; // Display names are not unique and must never select a save.
+    if(!selected_account.empty()&&(selected_account.size()!=17||selected_account.find_first_not_of("0123456789")!=std::string::npos))return {};
+    if(save_id.empty())return {};
+    const bool decimal=save_id.find_first_not_of("0123456789")==std::string::npos;
+    uint32_t wanted=0;
+    if(decimal) {
+        try {auto value=std::stoull(save_id);if(value>UINT32_MAX)return {};wanted=static_cast<uint32_t>(value);}
+        catch(...){return {};}
+    }
+    std::string exact=save_id;
+    std::transform(exact.begin(),exact.end(),exact.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
     std::error_code ec;
-    struct UserAccount {
-        fs::path saves_dir;
-        std::filesystem::file_time_type latest_activity;
-    };
-    std::vector<UserAccount> user_accounts;
-
-    for (const auto& entry : fs::directory_iterator(base, ec)) {
-        if (!entry.is_directory(ec)) continue;
-        const auto account = entry.path().filename().wstring();
-        if (account.size()!=17 || account.find_first_not_of(L"0123456789")!=std::wstring::npos) continue;
-        fs::path saves_dir = entry.path() / L"Saves";
-        if (!fs::exists(saves_dir, ec) || !fs::is_directory(saves_dir, ec)) continue;
-
-        std::filesystem::file_time_type latest{};
-        bool has_files = false;
-        for (const auto& f : fs::directory_iterator(saves_dir, ec)) {
-            if (!f.is_regular_file(ec)) continue;
-            auto mt = f.last_write_time(ec);
-            if (ec) {ec.clear();continue;}
-            if (!has_files || mt > latest) {
-                latest = mt;
-                has_files = true;
+    std::vector<fs::path> matches;
+    for(const auto& account:fs::directory_iterator(base,ec)) {
+        const auto name=account.path().filename().wstring();
+        if(!account.is_directory(ec)||name.size()!=17||name.find_first_not_of(L"0123456789")!=std::wstring::npos)continue;
+        if(!selected_account.empty()&&narrow(name)!=selected_account)continue;
+        const auto folder=account.path()/L"Saves";
+        if(!fs::is_directory(folder,ec)){ec.clear();continue;}
+        for(const auto& file:fs::directory_iterator(folder,ec)) {
+            if(!file.is_regular_file(ec))continue;
+            const std::string filename=narrow(file.path().filename().wstring());
+            std::string lower=filename;
+            std::transform(lower.begin(),lower.end(),lower.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
+            if(lower.size()<6||lower.substr(lower.size()-6)!=".park2")continue;
+            bool match=decimal&&saveFilenameIdentifier(filename)==wanted;
+            if(!decimal) {
+                const std::string stem=lower.substr(0,lower.size()-6);
+                const auto dash=stem.rfind('-');
+                // Compatibility for explicit filenames and older hexadecimal
+                // callers. Both are exact matches, never substring/prefix matches.
+                match=exact==lower||exact==stem||(exact.size()==8&&exact.find_first_not_of("0123456789abcdef")==std::string::npos
+                    &&dash!=std::string::npos&&stem.substr(dash+1)==exact);
             }
-        }
-        if (has_files) {
-            user_accounts.push_back({saves_dir, latest});
+            if(match)matches.push_back(file.path());
         }
     }
-    if (user_accounts.empty()) return {};
-
-    std::sort(user_accounts.begin(), user_accounts.end(), [](const UserAccount& a, const UserAccount& b) {
-        return a.latest_activity > b.latest_activity;
-    });
-
-    std::string lower_id = save_id;
-    std::transform(lower_id.begin(), lower_id.end(), lower_id.begin(), ::tolower);
-    std::string lower_name = park_name;
-    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
-
-    struct Candidate {
-        fs::path path;
-        std::filesystem::file_time_type mtime;
-    };
-
-    // Never fall through to another Steam account when this profile has no match.
-    for (const auto& acc : std::vector<UserAccount>{user_accounts.front()}) {
-        std::vector<Candidate> candidates;
-        for (const auto& f : fs::directory_iterator(acc.saves_dir, ec)) {
-            if (!f.is_regular_file(ec)) continue;
-            auto ext = f.path().extension().wstring();
-            if (ext == L".park2") {
-                candidates.push_back({f.path(), f.last_write_time(ec)});
-            }
-        }
-        if (candidates.empty()) continue;
-
-        std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
-            return a.mtime > b.mtime;
-        });
-
-        if (!lower_id.empty()) {
-            for (const auto& c : candidates) {
-                std::string filename = narrow(c.path.filename().wstring());
-                std::string lower_fname = filename;
-                std::transform(lower_fname.begin(), lower_fname.end(), lower_fname.begin(), ::tolower);
-                if (lower_fname.find(lower_id) != std::string::npos) {
-                    return c.path;
-                }
-            }
-        }
-
-        if (!lower_name.empty()) {
-            for (const auto& c : candidates) {
-                std::string filename = narrow(c.path.filename().wstring());
-                std::string lower_fname = filename;
-                std::transform(lower_fname.begin(), lower_fname.end(), lower_fname.begin(), ::tolower);
-                if (lower_fname.find(lower_name) == 0) {
-                    return c.path;
-                }
-            }
-        }
-
-        if (lower_name.empty() && lower_id.empty()) {
-            return candidates[0].path;
-        }
+    // A duplicate filename across profiles or a hash collision is ambiguous.
+    // Neither modification time nor park name can resolve the selected token.
+    if(matches.size()!=1) {
+        bridgeDebug("Save selection rejected: identifier=%s exact_matches=%zu",save_id.c_str(),matches.size());
+        return {};
     }
-
-    return {};
+    bridgeDebug("Save selected by exact identity: identifier=%s file=%s",save_id.c_str(),narrow(matches[0].filename().wstring()).c_str());
+    return matches[0];
 }
 
 static fs::path find_save_file(const std::string& save_id, const std::string& park_name) {
@@ -1442,7 +1428,10 @@ static fs::path find_save_file(const std::string& save_id, const std::string& pa
     }
     if (base.empty() || !fs::exists(base, ec)) return {};
 
-    return find_save_in_profiles(base,save_id,park_name);
+    const auto account=currentSteamAccount();
+    const std::string profile=account?std::to_string(account):std::string();
+    bridgeDebug("Save profile selection: steam_account_available=%d",account!=0);
+    return find_save_in_profiles(base,save_id,park_name,profile);
 }
 
 static bool backup_save_file(const std::string& save_id, const std::string& park_name, std::string& out_source, std::string& out_backup) {
@@ -1535,7 +1524,7 @@ static std::vector<uint8_t> extract_park2_entry(const std::vector<uint8_t>& file
 
 static void convert_save(const fs::path& mod_dir, const std::string& identifier,
                          const std::string& park_name, const std::string& biome_arg,
-                         const std::string& nonce) {
+                         const std::string& nonce, const fs::path& explicit_source={}) {
     fs::path cache = mod_dir / "AutoConversion";
     fs::create_directories(cache);
     int progress_seq = 0;
@@ -1558,13 +1547,22 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
 
     try {
         progress(5, "Finding the selected local save");
-        fs::path save_path = find_save_file(identifier, park_name);
+        fs::path save_path = explicit_source.empty()?find_save_file(identifier, park_name):explicit_source;
         if (save_path.empty() || !fs::exists(save_path)) {
-            fail("Could not find local save file for conversion. Original park unchanged.");
+            fail("Could not uniquely identify the selected local save. Original park loaded unchanged; conversion skipped.");
             return;
         }
 
+        int terrain_size=2048;
         std::string raw_biome = biome_arg;
+        const auto colon=raw_biome.find(':');
+        if(colon!=std::string::npos) {
+            const auto size=raw_biome.substr(colon+1);
+            if(size!="2048"&&size!="4096")throw std::runtime_error("Unsupported conversion terrain size.");
+            terrain_size=size=="4096"?4096:2048;raw_biome.resize(colon);
+        }
+        const int width=terrain_size/512,inner=width/2-1;
+        const std::string map_folder=terrain_size==4096?"Maps4096":"Maps";
         std::transform(raw_biome.begin(), raw_biome.end(), raw_biome.begin(), ::tolower);
         std::string donor_name;
         double seed[3]{};
@@ -1589,15 +1587,16 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
         }
 
         auto finish_ready = [&]() {
-            char res[1024];
+            char res[2048];
             snprintf(res, sizeof(res),
                 "return {status=\"ready\",progress=100,message=\"Conversion verified. Loading the expanded copy.\",\n"
                 "native=\"/run/Win64/ovldata/Mod_BoundaryLab/AutoConversion/%s.bin\",\n"
-                "info={version=1,conversionVersion=2,biomeSource=\"boundary\",filename=\"%s.bin\",terrainSize=2048,\n"
+                "requestIdentifier=\"%s\",sourceIdentifier=\"%u\",\n"
+                "info={version=1,conversionVersion=2,biomeSource=\"boundary\",filename=\"%s.bin\",terrainSize=%d,\n"
                 "seed={%.7f,%.7f,%.7f},\n"
                 "bounds={%.7f,%.7f,%.7f,%.7f},\n"
                 "sourceHash=\"%s\",sourceName=\"%s\"}}\n",
-                conversion_hash.c_str(), donor_name.c_str(),
+                conversion_hash.c_str(), identifier.c_str(), saveFilenameIdentifier(narrow(save_path.filename().wstring())), donor_name.c_str(), terrain_size,
                 seed[0], seed[1], seed[2],
                 bounds[0], bounds[1], bounds[2], bounds[3],
                 source_hash.c_str(), clean_name.c_str());
@@ -1686,7 +1685,7 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
         bridgeDebug("Conversion biome: metadata=%s contour=%s donor=%s",raw_biome.c_str(),detected.biome,detected.donor);
         raw_biome=detected.biome;
         // Old cache entries may contain the wrong donor; never reuse those files.
-        const std::string cacheIdentity=source_hash+":boundary-v2:"+donor_name;
+        const std::string cacheIdentity=source_hash+":boundary-v3:"+donor_name+":"+std::to_string(terrain_size);
         conversion_hash=sha256_hex_from_raw(sha256_raw(reinterpret_cast<const uint8_t*>(cacheIdentity.data()),cacheIdentity.size()).data(),32);
         native_file=cache/(wide(conversion_hash.c_str())+L".bin");
         if (fs::exists(native_file) && fs::file_size(native_file) > 100) {
@@ -1710,7 +1709,7 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
         const auto& old_block = info.blocks[vt_idx];
 
         const uint8_t marker_old[] = {0x05, 0x02, 0x01, 0x02, 0xc2, 0x00, 0x01, 0x00};
-        const uint8_t marker_expanded[] = {0x05, 0x04, 0x09, 0x04, 0xc2, 0x00, 0x01, 0x00};
+        const uint8_t marker_expanded[] = {0x05, static_cast<uint8_t>(width), 0x09, static_cast<uint8_t>(width), 0xc2, 0x00, 0x01, 0x00};
 
         auto it_old = std::search(body_vec.begin() + old_block.version_end, body_vec.begin() + old_block.end,
                                   std::begin(marker_old), std::end(marker_old));
@@ -1726,11 +1725,11 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
         }
         size_t old_pos = std::distance(body_vec.begin(), it_old);
 
-        fs::path donor_path = mod_dir / "Maps" / (donor_name + ".bin");
-        fs::path donor_trn = mod_dir / "Maps" / (donor_name + ".trn");
+        fs::path donor_path = mod_dir / map_folder / (donor_name + ".bin");
+        fs::path donor_trn = mod_dir / map_folder / (donor_name + ".trn");
         if (!fs::exists(donor_path) || !fs::exists(donor_trn)) {
             progress(30, "Generating expanded base terrain");
-            prepare_map(mod_dir, raw_biome, nonce + "-prep");
+            prepare_map(mod_dir, raw_biome+":"+std::to_string(terrain_size), nonce + "-prep");
             if (!fs::exists(donor_path) || !fs::exists(donor_trn)) {
                 fail("Could not prepare base terrain for biome: " + donor_name);
                 return;
@@ -1767,7 +1766,7 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
         Volume donor_vol = parse_volume(donor_raw.data() + donor_pos, donor_block.end - donor_pos);
 
         if (old_vol.shape[0] != 2 || old_vol.shape[1] != 1 || old_vol.shape[2] != 2 ||
-            donor_vol.shape[0] != 4 || donor_vol.shape[1] != 9 || donor_vol.shape[2] != 4) {
+            donor_vol.shape[0] != width || donor_vol.shape[1] != 9 || donor_vol.shape[2] != width) {
             fail("Incompatible terrain voxel shape. Original park unchanged.");
             return;
         }
@@ -1777,23 +1776,23 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
         auto old_m = extract_material_parts(old_vol);
         auto donor_m = extract_material_parts(donor_vol);
 
-        std::vector<uint8_t> signs(18, 0);
+        std::vector<uint8_t> signs((width*9*width+7)/8, 0);
         std::vector<uint8_t> all_trees;
         std::vector<uint8_t> all_densities;
         std::vector<uint8_t> all_materials[4];
 
-        for (int z = 0; z < 4; ++z) {
+        for (int z = 0; z < width; ++z) {
             for (int y = 0; y < 9; ++y) {
-                for (int x = 0; x < 4; ++x) {
-                    int index = (z * 9 + y) * 4 + x;
+                for (int x = 0; x < width; ++x) {
+                    int index = (z * 9 + y) * width + x;
                     const RootInfo* r = nullptr;
                     const std::vector<uint8_t>* tree_src = nullptr;
                     const uint8_t* d_src = nullptr;
                     size_t d_count = 0;
                     const MaterialPart* mp = nullptr;
 
-                    if ((x == 1 || x == 2) && y == 4 && (z == 1 || z == 2)) {
-                        int source = (z - 1) * 2 + (x - 1);
+                    if ((x == inner || x == inner+1) && y == 4 && (z == inner || z == inner+1)) {
+                        int source = (z - inner) * 2 + (x - inner);
                         r = &old_vol.roots[source];
                         tree_src = &old_vol.tree;
                         d_src = old_d.data() + r->sample_begin;
@@ -1820,9 +1819,9 @@ static void convert_save(const fs::path& mod_dir, const std::string& identifier,
 
         std::vector<uint8_t> replacement;
         put_uint(replacement, 5);
-        put_uint(replacement, 4);
+        put_uint(replacement, width);
         put_uint(replacement, 9);
-        put_uint(replacement, 4);
+        put_uint(replacement, width);
         put_uint(replacement, 512);
         put_uint(replacement, 1);
         replacement.push_back(0);
@@ -1886,9 +1885,13 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
         auto cache = mod / L"AutoConversion";
         fs::create_directories(cache);
         bool supported = supportedGame();
+        auto gameBase=reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
+        auto gamePE=reinterpret_cast<IMAGE_NT_HEADERS64*>(gameBase+reinterpret_cast<IMAGE_DOS_HEADER*>(gameBase)->e_lfanew);
+        const size_t gameSize=gamePE->OptionalHeader.SizeOfImage;
+        bridgeDebug("Game identity: timestamp=0x%x image_size=0x%x",gamePE->FileHeader.TimeDateStamp,gamePE->OptionalHeader.SizeOfImage);
         bridgeDebug("Begin: supported_game=%d",supported);
         atomicWrite(cache / L"BridgeInfo.lua", supported ?
-            "return {version=32,supported=true}\n" :
+            "return {version=32,supported=true,saveIdentityVersion=1}\n" :
             "return {version=32,supported=false,message=\"Automatic conversion does not support this game build. Original park unchanged.\"}\n");
         if (!supported) return 0;
 
@@ -1908,37 +1911,40 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
 
         if (std::strcmp(identifier, "__initialize_sea__") == 0) {
             std::string error;
-            bool ok_sea = configureSeaRaster(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)), 0x130a4000, error);
+            bool ok_sea = configureSeaRaster(gameBase, gameSize, error);
             std::string nav_error;
-            bool ok_nav=configureNavigationBounds(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)),0x130a4000,nav_error);
+            bool ok_nav=configureNavigationBounds(gameBase,gameSize,nav_error);
             bridgeDebug("navigation startup: ready=%d min=-2048 max=2048 error=%s",ok_nav,nav_error.c_str());
             std::string crowd_error;
-            bool ok_crowd=configureCrowdGrid(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)),0x130a4000,crowd_error);
+            bool ok_crowd=configureCrowdGrid(gameBase,gameSize,crowd_error);
             bridgeDebug("crowd grid startup: ready=%d size=%d error=%s",ok_crowd,ok_crowd?4096:1024,crowd_error.c_str());
+            std::string culling_error;
+            bool ok_culling=configureCullingRehash(gameBase,gameSize,culling_error);
+            bridgeDebug("culling rehash startup: ready=%d error=%s",ok_culling,culling_error.c_str());
             std::string hook_err;
-            bool ok_hook = installBoundaryHook(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)), 0x130a4000, hook_err);
+            bool ok_hook = installBoundaryHook(gameBase, gameSize, hook_err);
             // A navigation-only failure leaves the original navigable area.
             // Do not abort a safe terrain load before CPTWorld can initialize.
             if (ok_sea && ok_hook)
-                atomicWrite(status, "return {status=\"sea_ready\",seaRaster=4096,boundaryHook=true,navigationHalfSize="+
+                atomicWrite(status, "return {status=\"sea_ready\",seaRaster=4096,boundaryHook=true,gameBuild=\""+
+                    std::string(updatedGameBuild?"1.12.2.1035111":"legacy-6abfabee")+"\",navigationHalfSize="+
                     std::string(ok_nav?"2048":"512")+",navigationError="+(ok_nav?"nil":"\""+nav_error+"\"")+
-                    ",crowdGridSize="+(ok_crowd?"4096":"1024")+",crowdGridError="+(ok_crowd?"nil":"\""+crowd_error+"\"")+"}\n");
+                    ",crowdGridSize="+(ok_crowd?"4096":"1024")+",crowdGridError="+(ok_crowd?"nil":"\""+crowd_error+"\"")+",cullingRehashFix="+(ok_culling?"true":"false")+
+                    ",cullingError="+(ok_culling?"nil":"\""+culling_error+"\"")+"}\n");
             else atomicWrite(status, "return {status=\"error\",message=\"" + error + "; " + hook_err + "; " + nav_error + "\"}\n");
             return 0;
         }
 
         if(std::strcmp(identifier,"__boundary_diagnostics__")==0) {
             atomicWrite(status,"return {status=\"ok\",calls="+std::to_string(boundaryCalls.load())+
-                ",overrides="+std::to_string(boundaryOverrides.load())+",installed="+(g_boundary_hook_installed?"true":"false")+"}\n");
+                ",overrides="+std::to_string(boundaryOverrides.load())+",halfSize="+std::to_string(g_expanded_half_size.load())+",installed="+(g_boundary_hook_installed?"true":"false")+"}\n");
             return 0;
         }
 
         if (std::strcmp(identifier, "__set_boundary_size__") == 0) {
             try {
                 float size_val = std::stof(biome);
-                if (size_val > 100.0f) {
-                    g_expanded_half_size.store(size_val * 0.5f + 10.0f, std::memory_order_relaxed);
-                }
+                setExpandedBoundarySize(size_val);
             } catch (...) {}
             atomicWrite(status, "return {status=\"ok\"}\n");
             return 0;
@@ -1964,6 +1970,12 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
             CloseHandle(worker_thread);
             worker_thread = nullptr;
         }
+
+        // A restarted game can reuse a random nonce. Clear its old result
+        // before accepting a new background request; never load a stale copy.
+        std::error_code resultError;
+        fs::remove(cache/(L"Result-"+wide(nonce)+L".lua"),resultError);
+        if(resultError)throw std::runtime_error("Could not clear a previous conversion response. Original park unchanged.");
 
         if (std::strcmp(identifier, "__prepare_map__") == 0) {
             atomicWrite(status, "return {status=\"working\",progress=0,message=\"Starting background terrain preparation\"}\n");
@@ -2006,6 +2018,16 @@ int main(int argc, char** argv) {
 #endif
 
 #ifdef BRIDGE_TEST
+extern "C" __declspec(dllexport) int TestSelectGameBuild(uint32_t timestamp,uint32_t size) {return selectGameBuild(timestamp,size);}
+extern "C" __declspec(dllexport) void TestConvertFromFile(const wchar_t* mod,const wchar_t* source,const char* biome,const char* nonce) {
+    convert_save(mod,"test-source","Fixture",biome,nonce,fs::path(source));
+}
+extern "C" __declspec(dllexport) int TestFindSaveForAccount(const wchar_t* base,const char* id,const char* name,const char* account,wchar_t* output,size_t capacity) {
+    const auto path=find_save_in_profiles(fs::path(base),id,name,account).wstring();
+    if(path.size()+1>capacity)return -1;
+    std::copy(path.begin(),path.end(),output);output[path.size()]=0;
+    return path.empty()?0:1;
+}
 extern "C" __declspec(dllexport) int TestFindSave(const wchar_t* base,const char* id,const char* name,wchar_t* output,size_t capacity) {
     const auto path=find_save_in_profiles(fs::path(base),id,name).wstring();
     if(path.size()+1>capacity) return -1;
@@ -2036,6 +2058,9 @@ extern "C" __declspec(dllexport) int TestCrowdInitialize(void* function,void* gr
         return 1;
     } __except(recordTestNativeFault(GetExceptionInformation())) {return 0;}
 }
+extern "C" __declspec(dllexport) int TestCullingRehash(void* image,size_t length) {
+    std::string error;return configureCullingRehash(static_cast<unsigned char*>(image),length,error)?1:0;
+}
 extern "C" __declspec(dllexport) int TestCrowdGrid(void* image,size_t length) {
     std::string error;
     return configureCrowdGrid(static_cast<unsigned char*>(image),length,error)?1:0;
@@ -2062,6 +2087,7 @@ extern "C" __declspec(dllexport) int TestArgumentContract(void* state) {
     for (int index = 1; index <= 4; ++index) if (!readArgument(state, index, value, sizeof(value))) return 0;
     return 1;
 }
+extern "C" __declspec(dllexport) int TestBoundarySize(float width) {return setExpandedBoundarySize(width);}
 extern "C" __declspec(dllexport) int TestBoundaryHook(void* image, size_t length) {
     std::string error;
     return installBoundaryHook(static_cast<unsigned char*>(image), length, error) ? 1 : 0;

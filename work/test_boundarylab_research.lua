@@ -42,6 +42,8 @@ require=function(name)
  return originalRequire(name)
 end
 local R=assert(loadfile('work/boundarylab/Main/boundarylab.research.lua'))()
+local syncedWidth
+R.SyncBoundarySize=function(width)syncedWidth=width end
 assert(table.concat(R.Costs,',')=='12500,25000,50000,100000,200000')
 local templates={['/run/parks/sandbox/taigasandbox.bin']={seed={0,0,0},bounds={-500,500,-500,500}}}
 local function create(isFree)
@@ -92,6 +94,7 @@ local other={sandboxSettingsManager=world.sandboxSettingsManager}
 R.BeforeLoad(other);loadCallback(saved);R.AfterLoad(other,templates);assert(plotsUnlocked and plotRestrictionsCleared and enforcedAreaCleared)
 assert(other.boundaryLabResearch.width==5 and other.boundaryLabResearch.height==5 and box.top==2048)
 assert(other.boundaryLabActiveSeed[1]==1020 and other.boundaryLabTerrainCreated)
+assert(syncedWidth==2040)
 R.Report();assert(clipboard:find('WIDTH_LEVEL=5 HEIGHT_LEVEL=5',1,true))
 print('PASS save reload restores tiers and exact contour seed')
 local world4k=create(false)
@@ -112,9 +115,17 @@ assert(not world4k.boundaryLabQueued)
 local saved4k={};saveCallback(saved4k)
 R.Shutdown(world4k)
 local other4k={sandboxSettingsManager=world4k.sandboxSettingsManager,parkExpansionsTerrainSize=4096}
-R.BeforeLoad(other4k);loadCallback(saved4k);R.AfterLoad(other4k,templates)
+local loader=loadfile
+loadfile=function(path,mode,env)
+ if path:match('Mod_BoundaryLab/Config.ini$')then return load('ResearchEnabled=true; ManualParkSize=2040; ManualMaxHeight=2048; Enable4KMap=true','@fixture',mode,env)end
+ return loader(path,mode,env)
+end
+R.BeforeLoad(other4k);assert(syncedWidth==0)
+loadCallback(saved4k);R.AfterLoad(other4k,templates)
+loadfile=loader
+assert(syncedWidth==4088,'Saved 4K contour must override manual config even with research enabled')
 assert(other4k.boundaryLabResearch.width==7 and other4k.boundaryLabActiveSeed[1]==2044)
-R.Shutdown(other4k)
+R.Shutdown(other4k);assert(syncedWidth==0,'Leaving the active park must disable the override')
 print('PASS 4K width research expands to 7 steps with 400k/800k pricing and roundtrip saves')
 world=create(false);balance=10
 R.Request('width',1);assert(not world.boundaryLabQueued and suspended==0 and balance==10)
@@ -205,14 +216,21 @@ R.Shutdown(large)
 print('PASS above-2048 requests accepted without configuration clamping')
 for _,text in ipairs({'ResearchEnabled="no"','ResearchEnabled=false;ManualParkSize=0',
  'ResearchEnabled=false;ManualMaxHeight=0/0','ResearchEnabled=false;ManualParkSize=1/0','ResearchEnabled=',
- 'Enable4KMap="no"','MaxMapSize=8192'})do
+ 'Enable4KMap="no"','MaxMapSize=8192','SceneryMode="Other"','SceneryMode=false','EditableSceneryPercent=-1','EditableSceneryPercent=101','EditableSceneryPercent=0/0'})do
  local invalid=loadConfigured(text)
  assert(invalid.parkExpansionsConfig.error and invalid.parkExpansionsConfig.ResearchEnabled==true and invalid.parkExpansionsConfig.Enable4KMap==false)
  assert(not invalid.boundaryLabQueued and balance==12345)
  R.Shutdown(invalid)
 end
 print('PASS malformed config, invalid types and nonfinite numbers fail without applying manual limits')
+for _,mode in ipairs({'Editable','Background','None'})do
+ local configured=loadConfigured('SceneryMode="'..mode..'"')
+ assert(configured.parkExpansionsConfig.SceneryMode==mode and not configured.parkExpansionsConfig.error)
+ R.Shutdown(configured)
+end
+print('PASS scenery modes accepted; invalid modes rejected')
 local defaultCfg=loadConfigured('ResearchEnabled=true')
+assert(defaultCfg.parkExpansionsConfig.SceneryMode=="Editable" and defaultCfg.parkExpansionsConfig.EditableSceneryPercent==50)
 assert(defaultCfg.parkExpansionsConfig.Enable4KMap==false and defaultCfg.parkExpansionsConfig.MaxMapSize==2048)
 R.Shutdown(defaultCfg)
 local enable4k=loadConfigured('Enable4KMap=true')

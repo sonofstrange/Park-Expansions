@@ -1,4 +1,4 @@
-# Building Park Expansions 0.57
+# Building Park Expansions 0.63
 
 Run commands from the repository root on **64-bit Windows**. Source for every mod-specific compiled component is included. No game executable or save is needed to compile the DLL.
 
@@ -10,7 +10,7 @@ Install Visual Studio Build Tools with the **Desktop development with C++** work
 tools\build_native.cmd
 ```
 
-This compiles `work/compatibility/bridge.cpp` and `work/compatibility/miniz.c` using MSVC `/std:c++17 /EHsc /O2 /MT /LD`, builds and runs the native contract tests, then copies the DLL (`ParkExpansionsBridge.dll`, ~415 KB) into `work/boundarylab/Mod_BoundaryLab/Compatibility/`.
+This compiles `work/compatibility/bridge.cpp` and `work/compatibility/miniz.c` using MSVC `/std:c++17 /EHsc /O2 /MT /LD`, builds and runs the native contract tests, then copies the DLL (`ParkExpansionsBridge.dll`, ~550 KB) into `work/boundarylab/Mod_BoundaryLab/Compatibility/`.
 
 All voxel terrain octree generation, mipmap downsampling, and dynamic scenery backdrop extraction are fully self-contained inside the DLL running on background threads. No separate `.exe` process or external runtime is required.
 
@@ -31,7 +31,7 @@ The OVL builder syntax-checks Lua, creates a Planet Coaster 2 ZLIB OVL, and chec
 python tools/package.py
 ```
 
-Creates `dist/Park-Expansions-0.57.zip` (about 257 KiB) containing only 4 clean files and updates `release-manifest.json`.
+Creates `dist/Park-Expansions-0.63.zip` containing only 4 clean files and updates `release-manifest.json`.
 
 
 ## Navigation regression checks

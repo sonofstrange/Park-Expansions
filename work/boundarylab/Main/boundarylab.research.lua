@@ -14,15 +14,25 @@ function R.InitializeNative()
         local nonce=g.tostring(g.math.random(1,1000000000)).."-"..g.tostring(g.math.random(1,1000000000))
         begin("__initialize_sea__","Sea raster initialization","4096",nonce)
         local chunk=g.loadfile("Win64/ovldata/Mod_BoundaryLab/AutoConversion/State-"..nonce..".lua","t",{})
-        if not chunk then g.error("Sea raster component did not respond. Check the installed bridge DLL.") end
+        if not chunk then
+            local info=g.loadfile("Win64/ovldata/Mod_BoundaryLab/AutoConversion/BridgeInfo.lua","t",{})
+            local bridge=info and info()
+            if g.type(bridge)=="table" and bridge.supported==false then
+                g.error(bridge.message or "This game build is not supported. Update Park Expansions.")
+            end
+            g.error("Sea raster component did not respond. Check the installed bridge DLL.")
+        end
         local status=chunk()
         if g.type(status)~="table" or status.status~="sea_ready" or status.seaRaster~=4096 then
             g.error(g.type(status)=="table" and status.message or "Sea raster response did not validate.")
         end
+        nativeSea.gameBuild=status.gameBuild
         nativeSea.navigationHalfSize=status.navigationHalfSize
         nativeSea.navigationError=status.navigationError
         nativeSea.crowdGridSize=status.crowdGridSize
         nativeSea.crowdGridError=status.crowdGridError
+        nativeSea.cullingRehashFix=status.cullingRehashFix
+        nativeSea.cullingError=status.cullingError
         nativeSea.boundaryHook=status.boundaryHook
         return true
     end)
@@ -80,6 +90,13 @@ function R.LoadConfig(world)
     if ok then ok,message=g.pcall(chunk) end
     if ok then
         ok,message=g.pcall(function()
+            if values.SceneryMode==nil then values.SceneryMode="Editable" end
+            if values.EditableSceneryPercent==nil then values.EditableSceneryPercent=50 end
+            g.assert(g.type(values.EditableSceneryPercent)=="number" and values.EditableSceneryPercent==values.EditableSceneryPercent
+                and values.EditableSceneryPercent>=0 and values.EditableSceneryPercent<=100,
+                "EditableSceneryPercent must be a number from 0 to 100")
+            g.assert(values.SceneryMode=="Editable" or values.SceneryMode=="Background" or values.SceneryMode=="None",
+                "SceneryMode must be Editable, Background, or None")
             if values.ResearchEnabled==nil then values.ResearchEnabled=true end
             g.assert(g.type(values.ResearchEnabled)=="boolean","ResearchEnabled must be true or false")
             if values.ConvertExistingSaves==nil then
@@ -123,10 +140,9 @@ function R.LoadConfig(world)
             if values.ResearchEnabled==false and (values.ManualParkSize>2048 or values.ManualMaxHeight>2048) then
                 values.warning="Values above 2048 may be unstable. Terrain and engine limits can still prevent placement."
             end
-            if values.ManualParkSize then R.SyncBoundarySize(values.ManualParkSize) end
         end)
     end
-    if not ok then values={ResearchEnabled=true,Enable4KMap=false,MaxMapSize=2048,CameraZoomMultiplier=2.0,error="Config error: "..g.tostring(message)} end
+    if not ok then values={ResearchEnabled=true,Enable4KMap=false,MaxMapSize=2048,SceneryMode="Editable",EditableSceneryPercent=50,CameraZoomMultiplier=2.0,error="Config error: "..g.tostring(message)} end
     world.parkExpansionsConfig=values
     return values
 end
@@ -440,12 +456,15 @@ function R.AutoConvert(world)
         if success and g.type(value)=="table" then return value end
     end
     R.LoadingProgress(true,0,"Preparing park…")
-    local started,errorMessage=g.pcall(begin,g.tostring(api.save.GetSaveIdentifier(request.cSaveToken)),
-        g.tostring(metadata.sName or save.sParkName or ""),biome,nonce)
+    local selectedToken=request.cSaveToken
+    local selectedIdentifier=g.tostring(api.save.GetSaveIdentifier(selectedToken))
+    world.parkExpansionsSelectedSaveIdentifier=selectedIdentifier
+    local started,errorMessage=g.pcall(begin,selectedIdentifier,
+        g.tostring(metadata.sName or save.sParkName or ""),biome..":"..g.tostring(cfg.MaxMapSize or 2048),nonce)
     if not started then fail(errorMessage);return end
     local bridge=read(base.."BridgeInfo.lua")
-    if not bridge or bridge.version~=32 or bridge.supported~=true then
-        fail(bridge and bridge.message or "Automatic conversion bridge did not initialize. Original park unchanged.");return
+    if not bridge or bridge.version~=32 or bridge.supported~=true or bridge.saveIdentityVersion~=1 then
+        fail(bridge and bridge.message or "Update the Park Expansions bridge DLL before converting saves. Original park unchanged.");return
     end
     local path=base.."State-"..nonce..".lua"
     local accepted=read(path)
@@ -461,19 +480,30 @@ function R.AutoConvert(world)
             if result then progressIndex=progressIndex+1 end
         end
         if result and result.status=="ready" then
+            if manager.tLoadParkFromSaveTokenRequest~=request or request.cSaveToken~=selectedToken then
+                fail("The selected save changed during conversion. Conversion was not applied.");return
+            end
+            if result.requestIdentifier~=selectedIdentifier or result.sourceIdentifier~=selectedIdentifier then
+                fail("Converted save identity does not match the selected park. Original park unchanged.");return
+            end
             local hash=result.native and result.native:match(
                 "^/run/Win64/ovldata/Mod_BoundaryLab/AutoConversion/([a-f0-9]+)%.bin$")
             if not hash or #hash~=64 or not validConvertedInfo(result.info) then
                 fail("Converted world response did not validate. Original park unchanged.");return
             end
+            local requestedSize=cfg.MaxMapSize or 2048
+            if (result.info.terrainSize or 2048)~=requestedSize then
+                fail("Converted terrain size does not match the requested map size. Original park unchanged.");return
+            end
             -- File loading clears the active save token too: Save opens Save As
             -- instead of overwriting the old park. Keep its mode and native data.
             manager.tLoadParkFromFileRequest={sFileName=result.native,
-                sTerrainFileName="/run/Win64/ovldata/Mod_BoundaryLab/Maps/"..result.info.filename:gsub("%.bin$",".trn"),
+                sTerrainFileName="/run/Win64/ovldata/Mod_BoundaryLab/"..(requestedSize==4096 and "Maps4096" or "Maps").."/"..result.info.filename:gsub("%.bin$",".trn"),
                 bAllowMissingTerrain=false}
             manager.tLoadParkFromSaveTokenRequest=nil
             manager.cLastActiveParkSaveToken=nil
             world.parkExpansionsAutoInfo=result.info
+            world.parkExpansionsSourceSaveIdentifier=result.sourceIdentifier
             R.LoadingProgress(false,100,"Park conversion successful.")
             world.parkExpansionsAutoStatus="Park conversion successful."
             world.boundaryLabProgress=0
@@ -583,6 +613,45 @@ function R.InstallCameraZoomFix()
         end)
 end
 
+-- Stock translation helpers clamp all axes to +/-1000, independently of the
+-- park boundary. Override that exact clamp only while those helpers run in a
+-- loaded managed park. Rotation, scale and placement validation stay stock.
+function R.InstallAdvancedMoveFix()
+    local hooks=g.require("forgeutils.hookmanager")
+    local contexts=g.setmetatable({}, {__mode="k"})
+    local function movementBounds()
+        if not current or not current.parkExpansionsParkReady
+            or not current.boundaryLabResearch or not current.boundaryLabResearch.managed then return end
+        local ok,minimum,maximum=g.pcall(function()
+            local terrain=api.world.GetWorldAPIs().voxelterrain
+            return terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
+        end)
+        if ok and minimum and maximum then return {minimum,maximum} end
+    end
+    local function stockBounds(minimum,maximum)
+        return minimum and maximum and minimum:GetX()==-1000 and minimum:GetY()==-1000 and minimum:GetZ()==-1000
+            and maximum:GetX()==1000 and maximum:GetY()==1000 and maximum:GetZ()==1000
+    end
+    hooks:AddHook("Common.MathUtils","ClampV3",function(original,position,minimum,maximum,...)
+        local bounds=contexts[g.coroutine.running()]
+        if bounds and stockBounds(minimum,maximum) then minimum,maximum=bounds[1],bounds[2] end
+        return original(position,minimum,maximum,...)
+    end)
+    local function translate(original,self,...)
+        local thread=g.coroutine.running()
+        local previous=contexts[thread]
+        contexts[thread]=movementBounds()
+        local result=g.table.pack(g.pcall(original,self,...))
+        contexts[thread]=previous
+        if not result[1] then g.error(result[2],0) end
+        return g.table.unpack(result,2,result.n)
+    end
+    hooks:AddHook("Editors.Scenery.Utils.DraggableWidgets","_StepDragAxisTranslate",translate)
+    hooks:AddHook("Editors.Scenery.Utils.DraggableWidgets","_StepDragPlaneTranslate",translate)
+    hooks:AddHook("Editors.Scenery.Utils.AxisPositioning","_Update_AlongNormal",translate)
+    hooks:AddHook("Editors.Scenery.Utils.AxisPositioning","_Update_AlongSurfaceAxis",translate)
+end
+
 function R.BackupNormalPark(world)
     local manager=world.parkLoadSaveManager
     local request=manager and manager.tLoadParkFromSaveTokenRequest
@@ -625,6 +694,7 @@ end
 
 function R.BeforeLoad(world)
     current=world
+    R.SyncBoundarySize(0)
     world.parkExpansionsParkReady=false
     R.LoadConfig(world)
     g.pcall(R.BackupNormalPark,world)
@@ -724,6 +794,9 @@ function R.AfterLoad(world,templates)
         world.boundaryLabMessage=world.parkExpansionsUnsupportedReason
     end
     if s.managed then
+        -- Restore the committed contour, never the configured future size.
+        local span=s.bounds and s.bounds[2] and s.bounds[1] and s.bounds[2]-s.bounds[1] or 0
+        R.SyncBoundarySize(span>1024 and span or 0)
         world.boundaryLabActiveSeed=s.seed
         world.boundaryLabExpectedBounds=s.bounds
         contours(world,world.boundaryLabTemplate)
@@ -867,6 +940,120 @@ function R.QueueManual(world)
     world.boundaryLabQueued=true
 end
 
+-- Read-only probes using the same gate/volume APIs as the stock ride UI and
+-- guest placement editor. Run on Copy Report, never during native world loading.
+function R.NavigationReport(w)
+    local station=w and w.ridestation
+    local crowd=api.crowdsimulation
+    if not station or g.type(station.GetAllStations)~="function"
+        or g.type(station.GetRideGateEntity)~="function" or not crowd
+        or g.type(crowd.IsPointOnPath)~="function" or not api.transform
+        or g.type(api.transform.CalculateWorldTransform)~="function" then
+        return "NAV_AUDIT=unavailable"
+    end
+    if g.type(crowd.ArePathSectionsPending)=="function" and crowd.ArePathSectionsPending() then
+        return "NAV_AUDIT=path sections pending; retry after construction finishes"
+    end
+    local Vector3=g.require("Vector3")
+    local ids=station:GetAllStations()
+    if g.type(ids)~="table" then return "NAV_AUDIT=station list unavailable" end
+    local lines={"NAV_AUDIT=read-only"}
+    local count,probes,mismatches=0,0,0
+    for _,id in g.ipairs(ids) do
+        if count>=64 then lines[#lines+1]="NAV_AUDIT_TRUNCATED=true";break end
+        count=count+1
+        local gate=station:GetRideGateEntity(id,station.RideGateType_Entrance)
+        if gate and gate~=0 then
+            local transform=api.transform.CalculateWorldTransform(gate)
+            local position,forward=transform:GetPos(),transform:GetF()
+            local exterior=g.math.max(g.math.abs(position:GetX()),g.math.abs(position:GetZ()))>512
+            local linked=station:HasConnectedQueue(id,station.RideGateType_Entrance)
+            lines[#lines+1]="NAV_STATION id="..g.tostring(id).." gate="..g.tostring(gate)
+                .." position="..g.tostring(position).." outside_vanilla="..g.tostring(exterior)
+                .." queue_connected="..g.tostring(linked)
+            -- Both sides of the gate: detect a local gap or a visual/crowd mismatch.
+            for _,distance in g.ipairs({-2,-1,1,2,4,8}) do
+                local point=Vector3:new(position:GetX()-forward:GetX()*distance,
+                    position:GetY()-forward:GetY()*distance,position:GetZ()-forward:GetZ()*distance)
+                local nav,projected
+                if w.volumes and g.type(w.volumes.GetNavPartFromRay)=="function" then
+                    nav,projected=w.volumes:GetNavPartFromRay(Vector3:new(point:GetX(),point:GetY()+4,point:GetZ()),
+                        Vector3:new(0,-1,0))
+                end
+                local sample=projected or point
+                local normal,_,staff=crowd.IsPointOnPath(sample,false)
+                local relaxed=crowd.IsPointOnPath(sample,true)
+                local queue=nav and nav:IsQueue() or false
+                local mismatch=nav~=nil and normal~=true and relaxed~=true
+                if mismatch then mismatches=mismatches+1 end
+                probes=probes+1
+                lines[#lines+1]="NAV_GATE_SAMPLE station="..g.tostring(id).." offset="..distance
+                    .." position="..g.tostring(sample).." volume="..g.tostring(nav~=nil)
+                    .." queue="..g.tostring(queue).." path="..g.tostring(normal)
+                    .." relaxed_path="..g.tostring(relaxed).." staff_path="..g.tostring(staff)
+                    .." mismatch="..g.tostring(mismatch)
+            end
+        end
+    end
+    lines[#lines+1]="NAV_AUDIT_STATIONS="..count.." PROBES="..probes.." MISMATCHES="..mismatches
+    return g.table.concat(lines,"\n")
+end
+
+-- One bounded, read-only sample when Copy Report is requested. This does not
+-- mute emitters, replace prefabs, remove components, or change saved scenery.
+function R.SceneryPerformanceReport(w)
+    local lines={"TREE_AUDIT=read-only"}
+    local scenery=w and w.scenery
+    local entity=api.entity
+    if not scenery or g.type(scenery.GetAllSceneryIDs)~="function"
+        or g.type(scenery.GetPropResourceName)~="function" then
+        return "TREE_AUDIT=unavailable"
+    end
+    local ids=scenery:GetAllSceneryIDs()
+    g.assert(g.type(ids)=="table","Scenery ID list is unavailable")
+    lines[#lines+1]="TREE_AUDIT_SCENERY_TOTAL="..#ids
+    local stride=g.math.max(1,g.math.ceil(#ids/256))
+    local probes,trees,audio,missing,errors=0,0,0,0,0
+    local canQuery=entity and g.type(entity.GetEntityPath)=="function"
+        and g.type(entity.FindEntityByName)=="function"
+        and api.transform and g.type(api.transform.GetParent)=="function"
+    local resources={}
+    for index=1,#ids,stride do
+        probes=probes+1
+        local id=ids[index]
+        local resource=scenery:GetPropResourceName(id)
+        if g.type(resource)=="string" and (resource:match("^NAT_Tree_") or resource:match("^PE_NAT_Tree_")) then
+            trees=trees+1
+            resources[resource]=(resources[resource] or 0)+1
+            if canQuery then
+                local ok,result=g.pcall(function()
+                    local path=entity.GetEntityPath(id)
+                    if g.type(path)~="string" or path=="" then return false end
+                    local child=entity.FindEntityByName(path.."/AudioTree")
+                    if not child or child==0 or child==entity.NullEntityID then return false end
+                    -- Do not count a global name match belonging to another tree.
+                    return api.transform.GetParent(child)==id
+                end)
+                if not ok then errors=errors+1
+                elseif result then audio=audio+1 else missing=missing+1 end
+            end
+        end
+    end
+    lines[#lines+1]="TREE_AUDIT_SAMPLED="..probes
+    lines[#lines+1]="TREE_AUDIT_TREES_SAMPLED="..trees
+    lines[#lines+1]="TREE_AUDIT_AUDIO_QUERY_AVAILABLE="..g.tostring(canQuery==true)
+    lines[#lines+1]="TREE_AUDIT_DIRECT_AUDIO_CHILDREN="..audio
+    lines[#lines+1]="TREE_AUDIT_NO_DIRECT_AUDIO_MATCH="..missing
+    lines[#lines+1]="TREE_AUDIT_QUERY_ERRORS="..errors
+    local names={}
+    for name in g.pairs(resources)do names[#names+1]=name end
+    g.table.sort(names)
+    for _,name in g.ipairs(names)do
+        lines[#lines+1]="TREE_AUDIT_RESOURCE="..name.." sampled="..resources[name]
+    end
+    return g.table.concat(lines,"\n")
+end
+
 function R.Report()
     if not current or current.parkExpansionsParkReady~=true then return end
     local s=state(current)
@@ -884,15 +1071,18 @@ function R.Report()
         local minimum,maximum=terrain:GetWorldBounds(terrain:GetPrimaryVoxelTerrainEntityID())
         return g.tostring(minimum).." .. "..g.tostring(maximum)
     end)
-    local report="Park Expansions 0.60 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
+    local report="Park Expansions 0.63 research report\nWIDTH_LEVEL="..s.width.." HEIGHT_LEVEL="..s.height
         .."\nTERRAIN_SIZE="..g.tostring(current.parkExpansionsTerrainSize or 2048)
-        .."\nSEA_RASTER="..g.tostring(nativeSea.ready and 4096 or "unavailable")
+        .."\nGAME_BUILD="..g.tostring(nativeSea.gameBuild).."\nSEA_RASTER="..g.tostring(nativeSea.ready and 4096 or "unavailable")
         .."\nSEA_RASTER_ERROR="..g.tostring(nativeSea.error)
         .."\nNAVIGATION_INITIALIZER_HALF_SIZE="..g.tostring(nativeSea.navigationHalfSize)
         .."\nNAVIGATION_SETUP_ERROR="..g.tostring(nativeSea.navigationError)
         .."\nCROWD_GRID_SIZE="..g.tostring(nativeSea.crowdGridSize)
         .."\nCROWD_GRID_ERROR="..g.tostring(nativeSea.crowdGridError)
+        .."\nCULLING_REHASH_FIX="..g.tostring(nativeSea.cullingRehashFix)
+        .."\nCULLING_REHASH_ERROR="..g.tostring(nativeSea.cullingError)
         .."\nBOUNDARY_HOOK="..g.tostring(nativeSea.boundaryHook)
+        .."\nBOUNDARY_HOOK_HALF_SIZE="..g.tostring(counters.halfSize)
         .."\nBOUNDARY_HOOK_CALLS="..g.tostring(counters.calls)
         .."\nBOUNDARY_HOOK_OVERRIDES="..g.tostring(counters.overrides)
         .."\nENV_CAPTURE_SPAN="..g.tostring(current.parkExpansionsCaptureSpan)
@@ -900,6 +1090,8 @@ function R.Report()
         .."\nENV_CAPTURE_POINTS="..g.tostring(current.parkExpansionsCaptureCount)
         .."\nTERRAIN_BOUNDS="..g.tostring(terrainBounds)
         .."\nTERRAIN_QUERY_OK="..g.tostring(terrainOK)
+        .."\nSELECTED_SAVE_IDENTIFIER="..g.tostring(current.parkExpansionsSelectedSaveIdentifier)
+        .."\nCONVERSION_SOURCE_IDENTIFIER="..g.tostring(current.parkExpansionsSourceSaveIdentifier)
         .."\nCONVERTED_SAVE="..g.tostring(current.parkExpansionsConverted~=nil)
         .."\nAUTO_CONVERSION="..g.tostring(current.parkExpansionsAutoStatus)
         .."\nAUTO_CONVERSION_ERROR="..g.tostring(current.parkExpansionsAutoError)
@@ -919,6 +1111,10 @@ function R.Report()
         .."\nMANUAL_HEIGHT="..g.tostring(settings(current).ManualMaxHeight)
         .."\nCONFIG_WARNING="..g.tostring(settings(current).warning)
         .."\nCONFIG_ERROR="..g.tostring(settings(current).error)
+        .."\nSCENERY_MODE="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.mode)
+        .."\nEDITABLE_SCENERY_PERCENT="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.density)
+        .."\nSCENERY_MODE_WARNING="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.modeWarning)
+        .."\nSCENERY_BACKGROUND_COUNT="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.backgroundCount)
         .."\nSCENERY_IMPORTED="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.complete)
         .."\nSCENERY_PENDING="..g.tostring(current.parkExpansionsSceneryPending or current.parkExpansionsSceneryTask~=nil)
         .."\nSCENERY_NEXT_INDEX="..g.tostring(current.parkExpansionsScenery and current.parkExpansionsScenery.nextIndex)
@@ -941,6 +1137,10 @@ function R.Report()
         .."\n"..(current.boundaryLabReport or current.boundaryLabMessage or "")
     local camZoomMax = (settings(current).CameraZoomMultiplier or 2.0) * 300
     report = report .. "\nCAMERA_ZOOM_MAX=" .. g.tostring(camZoomMax)
+    local navOK,navReport=g.pcall(R.NavigationReport,api.world.GetWorldAPIs())
+    report=report.."\n"..(navOK and navReport or ("NAV_AUDIT_ERROR="..g.tostring(navReport)))
+    local treeOK,treeReport=g.pcall(R.SceneryPerformanceReport,api.world.GetWorldAPIs())
+    report=report.."\n"..(treeOK and treeReport or ("TREE_AUDIT_ERROR="..g.tostring(treeReport)))
     api.world.GetWorldAPIs().editors:CopyToClipboard(report)
     current.boundaryLabMessage="Report copied. Paste it into chat with Ctrl+V."
     R.Push()
@@ -1001,7 +1201,7 @@ function R.Shutdown(world)
         api.world.GetWorldAPIs().worldserialisation:UnregisterWorldSerialisationClient("BoundaryLabResearch")
     end
     release(world)
-    if current==world then current=nil end
+    if current==world then R.SyncBoundarySize(0);current=nil end
 end
 
 -- Stock terrain-relative markers cast only 1000 m downward and format a miss

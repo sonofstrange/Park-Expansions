@@ -16,9 +16,9 @@ parser=argparse.ArgumentParser()
 parser.add_argument('--game-exe',type=Path,default=Path(r'D:\SteamLibrary\steamapps\common\Planet Coaster 2\PlanetCoaster2.exe'))
 exe=parser.parse_args().game_exe
 pe=pefile.PE(str(exe),fast_load=True)
-assert pe.FILE_HEADER.TimeDateStamp==0x6abfabee
-assert pe.OPTIONAL_HEADER.SizeOfImage==0x130a4000
-plan=(root/'work/compatibility/sea_raster_plan.h').read_text(encoding='utf-8')
+from native_test_build import identify,select,rva as game_rva
+updated=identify(pe)
+plan=(root/'work/compatibility'/('sea_raster_1122.h' if updated else 'sea_raster_plan.h')).read_text(encoding='utf-8')
 patches=[]
 for rva,length,a,b in re.findall(r'\{0x([0-9a-f]+),(\d+),\{([^}]+)\},\{([^}]+)\}\}',plan):
     parse=lambda x:bytes(int(v,16) for v in x.split(','))
@@ -28,6 +28,7 @@ guards=[tuple(int(x,16) for x in row) for row in re.findall(
 assert len(patches)==38 and len(guards)==2
 size=max(g[1] for g in guards)+4096
 dll=ctypes.CDLL(str(root/'build/bridge_contract.dll'))
+select(dll,pe)
 apply=dll.TestSeaRaster;apply.argtypes=[ctypes.c_void_p,ctypes.c_size_t];apply.restype=ctypes.c_int
 kernel=ctypes.WinDLL('kernel32',use_last_error=True)
 kernel.VirtualAlloc.argtypes=[ctypes.c_void_p,ctypes.c_size_t,ctypes.c_uint32,ctypes.c_uint32]
@@ -75,9 +76,9 @@ try:
             assert 0<=first<=last<4096**2
     assert (1024-4096//2)*2048+(1024-4096//2)==-2098176,'Must reproduce 0.49 dump index'
     values={rva:list(md.disasm(b,rva))[0] for rva,n,a,b in patches}
-    imm=lambda rva:values[rva].operands[-1].imm
+    imm=lambda old:values[game_rva(old)].operands[-1].imm
     assert imm(0x117cc73)==4096**2 and imm(0x117cc59)==4096**2*4
-    assert imm(0x117ccb7)==2048 and values[0x117cd85].operands[-1].mem.disp==2048
+    assert imm(0x117ccb7)==2048 and values[game_rva(0x117cd85)].operands[-1].mem.disp==2048
     for rva in [0x117cea7,0x117d02c,0x117d0d5,0x117d15e,0x117d1fc,0x117d306]:assert imm(rva)==12
     assert imm(0x117e7ab)==imm(0x117e800)==4096
     assert struct.unpack('<f',struct.pack('<I',imm(0x117e919)))[0]==4096

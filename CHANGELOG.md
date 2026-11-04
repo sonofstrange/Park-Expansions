@@ -2,6 +2,62 @@
 
 All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in this file.
 
+## [0.63] - 2026-11-04
+
+### Added
+- Added `SceneryMode` in Config.ini: `"Editable"` (default), `"Background"`, or `"None"`.
+- Added `EditableSceneryPercent` (0–100, default 50). Editable mode now restores half of the original backdrop placements by default. Set it to 100 to restore all placements.
+- Background mode restores non-editable visual models without ordinary gameplay scenery parts or scenery undo transactions. None skips restoration within expanded terrain.
+- Added scenery mode, density and tree-audio audit diagnostics to Copy Report.
+
+### Save behavior
+- Density selection is deterministic. Interrupted imports retain their saved percentage and resume without duplicating committed objects.
+- Existing complete or partial editable imports are retained. Changing mode or density does not remove objects already saved or player-edited scenery.
+- Background models are recreated on each load and cleaned up on shutdown or restoration failure.
+
+### Validation and known issues
+- Lua regression tests cover mode selection, density, partial imports, cleanup and save/reload behavior. OVL contents are checked against source files during the build.
+- The performance benefit has not been measured. Background rendering still needs in-game validation, and the tree-audio audit may report unavailable on some parks.
+- Some players report trees that cannot be removed. The cause is unconfirmed; this release does not claim to fix it.
+- Guest pathfinding and ground-level path/terrain intersections outside the original play area remain under investigation.
+- Park Expansions remains an experimental alpha. Expanded saves may become unstable or fail to load; keep separate backups.
+
+## [0.62] - 2026-11-01
+
+### Fixed
+- Fixed conversion loading a different park when the selected save could not be found. Save lookup now uses the game's filename identifier and the current Steam account, with no fallback to similar park names or recently modified files.
+- Ambiguous save matches leave the original load request unchanged. Conversion responses are checked against the selected save, and stale response files are cleared before a new request.
+- Initial conversion of supported existing saves now respects the 2K/4K setting, with separate conversion caches and matching terrain underlays.
+- Advanced movement now uses the loaded terrain bounds instead of the stock +/-1000 m coordinate clamp.
+- Restored saved park boundaries are now synchronized with the boundary hook. Manual configuration no longer replaces the saved boundary when research is enabled, and the override resets between parks.
+- Added the active boundary hook half-size and save identifiers to Copy Report diagnostics.
+
+### Validation
+- The user confirmed SonofPark conversion, and reports verified matching selected/source save identifiers and 4096 m terrain.
+- Native conversion tests verify preserved source terrain roots, materials, world coordinates and non-terrain clients for both 2K and 4K targets.
+- Regression tests cover duplicate profiles, identifier collisions, advanced movement and restored 4K boundary synchronization.
+
+### Known issues
+- Guest entry, staff placement and pathfinding in expanded areas still need broader in-game testing. This release does not claim these issues are fully resolved.
+- Ground-level paths can show terrain intersections outside the original play area; raised paths were reported to render correctly. A rendering fix is not included.
+- Already-converted 2K parks are not automatically migrated to 4K. Use the original pre-conversion save for initial 4K conversion.
+- The mod remains experimental. Expanded saves may become unstable or fail to load; recovery is not guaranteed.
+
+## [0.61] - 2026-10-29
+
+### Fixed
+- Restored compatibility with Planet Coaster 2 **1.12.2.1035111** after the game update.
+- Updated the verified addresses and code checks for the Sea raster, navigation bounds, crowd grid and park boundary hook. The previous executable profile is retained.
+- Fixed a stale bucket pointer in static scenery culling that could cause a crash when an expanded park loaded.
+- Unsupported game builds now show an explicit compatibility error instead of a generic missing bridge response.
+
+### Validation
+- The user confirmed park loading and expansion work on the updated game.
+- Private native tests cover the updated Sea instructions, navigation bounds, crowd coordinate lookup, boundary detour and culling insertion. Lua regression tests pass.
+
+### Known issues
+- Guest pathfinding in expanded areas may still be unreliable. This release does not resolve guests getting stuck or taking detours.
+
 ## [0.60] - 2026-10-29
 
 ### Fixed

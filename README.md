@@ -18,16 +18,31 @@ Keep the internal folder name `Mod_BoundaryLab`; it is required by the mod. Open
 
 ## Compatibility
 
-Release version **0.60**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. The native bridge is gated to game build **1.11.3.986758F**. Existing-save support is experimental; older conversion paths are not comprehensively validated in this release. Career, Franchise and Workshop-only saves are not supported by the converter.
+Release version **0.63**. On-demand terrain preparation supports Temperate, Tropical, Taiga and Mediterranean parks. The native bridge supports game build **1.12.2.1035111**, with the previous verified executable profile retained. Other builds are rejected before native patches are applied. Existing-save support is experimental; older conversion paths are not comprehensively validated in this release. Career, Franchise and Workshop-only saves are not supported by the converter.
 
 The maximum buildable width is 2040 m on standard 2K maps and 4088 m on 4K maps, leaving a 4 m safety margin at each terrain edge.
 
+Some players have reported trees that cannot be removed. The cause is not yet confirmed; this release does not claim to fix that issue. Background mode intentionally creates non-editable visual objects.
+
 ## Configuration
+
+`SceneryMode` controls the original backdrop objects within the expanded terrain:
+
+- `"Background"`: recreate the original non-editable skirt prefabs as temporary visual entities, without ordinary gameplay scenery parts or undo transactions. They are rebuilt each load.
+- `"Editable"` (default): import ordinary saved, editable scenery. Large imports can slow simulation.
+- `"None"`: skip restoration of these backdrop objects. Player-built scenery and the distant backdrop outside the expanded terrain are unaffected.
+
+`EditableSceneryPercent = 50` restores half of the original placements in Editable mode (default). Use 100 for all placements, or any percentage from 0 to 100. Selection is deterministic, does not alter cached source data, and is pinned in the save once import begins so partial imports resume without duplicates. It does not thin objects already saved in a park.
+
+Set the mode before loading a park without an editable import. Existing full or partial editable imports are retained: earlier versions did not store object IDs, so the mod cannot safely remove imported trees after players have moved, replaced or edited them. Changing the setting does not remove those objects or reduce their existing simulation load. Copy Report explains when this applies. Background mode still requires rendering resources; its effect on simulation performance needs an in-game comparison.
+
 
 `Mod_BoundaryLab/Config.ini` uses Lua syntax despite its file extension:
 
 ```lua
 ResearchEnabled = true
+SceneryMode = "Editable"
+EditableSceneryPercent = 50
 Enable4KMap = false
 ManualParkSize = 2040
 ManualMaxHeight = 2048
@@ -41,7 +56,7 @@ Each branch costs 12,500 / 25,000 / 50,000 / 100,000 / 200,000 research points. 
 
 ## Experimental
 
-**Known issue in 0.60:** guests can cross the original map boundary, but pathfinding in expanded areas may still be unreliable. Further investigation is ongoing.
+**Known issue in 0.63:** guests can cross the original map boundary, but pathfinding in expanded areas may still be unreliable. Further investigation is ongoing.
 
 **Conversion fix in 0.60:** The converter now verifies the original park boundary before selecting its terrain and scenery template. Older conversion caches are bypassed automatically; manual cache deletion is not required. To retry an incorrectly converted park, load the original save or its pre-conversion backup. This release does not rebuild the outer terrain of an already-saved incorrect conversion.
 

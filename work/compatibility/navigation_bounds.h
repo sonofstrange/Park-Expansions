@@ -47,18 +47,21 @@ static unsigned char* allocateNavigationConstants(unsigned char* nearAddress) {
 }
 
 static bool configureNavigationBounds(unsigned char* base,size_t size,std::string& error) {
-    constexpr uint32_t begin=0x164c500,end=0x164c7f5;
+    const uint32_t begin=updatedGameBuild?0x169a650:0x164c500,end=begin+0x2f5;
+    const uint32_t loads[2]={begin+12,begin+24};
+    const uint8_t updatedOriginal[2][7]={{0x0f,0x28,0x2d,0xcd,0x6b,0xa9,0x01},{0x0f,0x28,0x1d,0x61,0x66,0xa9,0x01}};
+    const auto& original=updatedGameBuild?updatedOriginal:navigationOriginal;
     if(size<end) {error="Navigation initializer is outside the image.";return false;}
     if(navigationImage==base && navigationConstants) {
-        for(int i=0;i<2;++i) if(std::memcmp(base+navigationLoads[i],navigationReplacement[i],7)) {
+        for(int i=0;i<2;++i) if(std::memcmp(base+loads[i],navigationReplacement[i],7)) {
             error="Navigation instructions changed after initialization.";return false;
         }
         return true;
     }
-    if(seaHash(base+begin,end-begin)!=0x376019742a709b97ULL) {
+    if(seaHash(base+begin,end-begin)!=(updatedGameBuild?0xd454d37935618ffaULL:0x376019742a709b97ULL)) {
         error="Navigation initializer differs from the supported build.";return false;
     }
-    for(int i=0;i<2;++i) if(std::memcmp(base+navigationLoads[i],navigationOriginal[i],7)) {
+    for(int i=0;i<2;++i) if(std::memcmp(base+loads[i],original[i],7)) {
         error="Navigation bounds load signature mismatch.";return false;
     }
     auto constants=allocateNavigationConstants(base+begin);
@@ -71,23 +74,23 @@ static bool configureNavigationBounds(unsigned char* base,size_t size,std::strin
     }
     uint8_t replacements[2][7];
     for(int i=0;i<2;++i) {
-        auto delta=reinterpret_cast<intptr_t>(constants+i*16)-reinterpret_cast<intptr_t>(base+navigationLoads[i]+7);
+        auto delta=reinterpret_cast<intptr_t>(constants+i*16)-reinterpret_cast<intptr_t>(base+loads[i]+7);
         if(delta<INT32_MIN || delta>INT32_MAX) {
             VirtualFree(constants,0,MEM_RELEASE);error="Navigation constants are outside RIP range.";return false;
         }
-        std::memcpy(replacements[i],navigationOriginal[i],7);
+        std::memcpy(replacements[i],original[i],7);
         int32_t relative=static_cast<int32_t>(delta);
         std::memcpy(replacements[i]+3,&relative,sizeof(relative));
     }
     // Both loads live on this single page; acquire permission before any write.
-    DWORD old=0;auto page=base+0x164c000;
+    DWORD old=0;auto page=base+(begin&~uint32_t(4095));
     if(!VirtualProtect(page,4096,PAGE_EXECUTE_READWRITE,&old)) {
         VirtualFree(constants,0,MEM_RELEASE);error="Cannot prepare navigation code page.";return false;
     }
-    for(int i=0;i<2;++i) std::memcpy(base+navigationLoads[i],replacements[i],7);
+    for(int i=0;i<2;++i) std::memcpy(base+loads[i],replacements[i],7);
     bool flushed=FlushInstructionCache(GetCurrentProcess(),base+begin,end-begin)!=0;
     if(!flushed) {
-        for(int i=0;i<2;++i) std::memcpy(base+navigationLoads[i],navigationOriginal[i],7);
+        for(int i=0;i<2;++i) std::memcpy(base+loads[i],original[i],7);
         FlushInstructionCache(GetCurrentProcess(),base+begin,end-begin);
         VirtualProtect(page,4096,old,&ignored);VirtualFree(constants,0,MEM_RELEASE);
         error="Navigation update failed; original instructions restored.";return false;

@@ -1,5 +1,5 @@
 local originalLoadfile,originalLoadlib=loadfile,package.loadlib
-for _,kind in ipairs({"ready","navigation-failed","unsupported","old-dll","missing","invalid"}) do
+for _,kind in ipairs({"ready","navigation-failed","unsupported","old-dll","unsupported-build","missing","invalid"}) do
     api={save={}}
     local R=assert(originalLoadfile('work/boundarylab/Main/boundarylab.research.lua'))()
     local calls=0
@@ -13,8 +13,13 @@ for _,kind in ipairs({"ready","navigation-failed","unsupported","old-dll","missi
         end
     end
     loadfile=function(path,mode,env)
-        assert(path:find("State-",1,true) and mode=="t" and type(env)=="table")
-        if kind=="old-dll" then return nil end
+        assert(mode=="t" and type(env)=="table")
+        if path:find("BridgeInfo.lua",1,true) then
+            if kind=="unsupported-build" then return function()return {supported=false,message="Unsupported game update"}end end
+            return nil
+        end
+        assert(path:find("State-",1,true))
+        if kind=="old-dll" or kind=="unsupported-build" then return nil end
         return function()
             if kind=="ready" then return {status="sea_ready",seaRaster=4096,navigationHalfSize=2048} end
             if kind=="navigation-failed" then return {status="sea_ready",seaRaster=4096,navigationHalfSize=512,navigationError="Allocation unavailable"} end
@@ -33,6 +38,7 @@ for _,kind in ipairs({"ready","navigation-failed","unsupported","old-dll","missi
         local world={parkLoadSaveManager={tLoadParkFromFileRequest={sFileName="/run/Parks/Sandbox/TaigaSandbox.bin"}},parkExpansionsConfig={Enable4KMap=true}}
         assert(R.PrepareMap(world)==false and world.parkExpansionsMapFailed)
         assert(type(world.parkExpansionsAutoError)=="string")
+        if kind=="unsupported-build" then assert(world.parkExpansionsAutoError:find("Unsupported game update",1,true)) end
     end
     print('PASS startup Sea raster '..kind)
 end
