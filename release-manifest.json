@@ -1,12 +1,12 @@
 {
-  "version": "0.63",
-  "archive": "Park-Expansions-0.63.zip",
-  "archive_sha256": "b7e520c6c8fffc20b126a343e3a4c37f1bdf920c210ef9f9e0e4702af072feb8",
-  "bytes": 312566,
+  "version": "0.64",
+  "archive": "Park-Expansions-0.64.zip",
+  "archive_sha256": "a07ce4d3ee62dd241d3a9fe4e5fcac14710300e0e14a0b72b6e55a053f50e9f3",
+  "bytes": 313307,
   "file_sha256": {
-    "Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll": "0251189218b86b08a0d7ecb358eb40c130fb0e1f8ddd4c1d2e9a4a4554f5c415",
-    "Mod_BoundaryLab/Config.ini": "723f5e236af5142b54236abfe7cced76aa4a542d3b5c372464c4ed2f8dacde13",
-    "Mod_BoundaryLab/Main.ovl": "e06dc414e189b20400a0d8b90c0a837b8650c1244784c69ddafef84cea2d0a20",
+    "Mod_BoundaryLab/Compatibility/ParkExpansionsBridge.dll": "e27bae7591bfbf1ebd263c715481a4052ae598eed446765c2d33697fd11b1044",
+    "Mod_BoundaryLab/Config.ini": "0a7858b33dd40e1fcbae61f1a07dd456222d0b6e39578692440bcef55769576b",
+    "Mod_BoundaryLab/Main.ovl": "78f04b3262904d663cfae7d5adf1fc9739bdf83e08a632f463187fd5246f147a",
     "Mod_BoundaryLab/Manifest.xml": "43841d0e4785ef45e81079e19687b6c45f2146467aed9c15bd08edaa14fcb24a"
   }
 }

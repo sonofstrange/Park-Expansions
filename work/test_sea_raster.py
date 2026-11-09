@@ -18,7 +18,7 @@ exe=parser.parse_args().game_exe
 pe=pefile.PE(str(exe),fast_load=True)
 from native_test_build import identify,select,rva as game_rva
 updated=identify(pe)
-plan=(root/'work/compatibility'/('sea_raster_1122.h' if updated else 'sea_raster_plan.h')).read_text(encoding='utf-8')
+plan=(root/'work/compatibility'/('sea_raster_1123.h' if pe.FILE_HEADER.TimeDateStamp==0x6ae8f335 else 'sea_raster_1122.h' if updated else 'sea_raster_plan.h')).read_text(encoding='utf-8')
 patches=[]
 for rva,length,a,b in re.findall(r'\{0x([0-9a-f]+),(\d+),\{([^}]+)\},\{([^}]+)\}\}',plan):
     parse=lambda x:bytes(int(v,16) for v in x.split(','))

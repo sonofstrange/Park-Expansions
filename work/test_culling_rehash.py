@@ -27,7 +27,7 @@ assert len(entry)==22
 c.memmove(image+0x1000,entry,len(entry))
 exit_code=bytes.fromhex('4883c420415e5e5fc3');c.memmove(image+0x1040,exit_code,len(exit_code))
 old=c.c_uint32()
-for page in [0x1000,game_rva(0x1a13000),game_rva(0x1a15000)]:assert k.VirtualProtect(image+page,4096,0x20,c.byref(old))
+for page in {0x1000,game_rva(0x1a13990)&~4095,*range(start&~4095,end,4096)}:assert k.VirtualProtect(image+page,4096,0x20,c.byref(old))
 execute=c.WINFUNCTYPE(c.c_void_p,c.c_void_p,c.c_void_p,c.c_void_p)(image+0x1000)
 hash_key=c.WINFUNCTYPE(c.c_uint32,c.c_void_p)(image+game_rva(0x1a13990))
 manager=c.create_string_buffer(0x160);node=c.create_string_buffer(0x30);existing=c.create_string_buffer(0x30)

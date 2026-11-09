@@ -7,8 +7,8 @@ static unsigned char* cullingImage=nullptr;
 static unsigned char* cullingHelper=nullptr;
 static uint8_t cullingReplacement[16]{};
 static bool configureCullingRehash(unsigned char* base,size_t size,std::string& error) {
-    const uint32_t begin=updatedGameBuild?0x1a63160:0x1a15020,end=begin+0x4ba,site=begin+0x3c8;
-    const uint32_t hashBegin=updatedGameBuild?0x1a61ad0:0x1a13990,hashReturn=hashBegin+0xcc;
+    const uint32_t begin=latestGameBuild?0x1a63cd0:updatedGameBuild?0x1a63160:0x1a15020,end=begin+0x4ba,site=begin+0x3c8;
+    const uint32_t hashBegin=latestGameBuild?0x1a62640:updatedGameBuild?0x1a61ad0:0x1a13990,hashReturn=hashBegin+0xcc;
     constexpr uint8_t original[16]={0x48,0x8b,0x07,0x48,0x89,0x06,0x48,0x89,0x37,0x49,0x8b,0x8e,0x30,0x01,0x00,0x00};
     constexpr size_t replaced=16;
     if(size<end){error="Culling insertion is outside the image.";return false;}
@@ -16,7 +16,7 @@ static bool configureCullingRehash(unsigned char* base,size_t size,std::string& 
         if(!std::memcmp(base+site,cullingReplacement,16))return true;
         error="Culling insertion changed after initialization.";return false;
     }
-    if(seaHash(base+begin,end-begin)!=(updatedGameBuild?0xb21adae2a7c1f69bULL:0xfa9ebdc7970dd59eULL)
+    if(seaHash(base+begin,end-begin)!=(latestGameBuild?0xc5e19af200d4013aULL:updatedGameBuild?0xb21adae2a7c1f69bULL:0xfa9ebdc7970dd59eULL)
         || seaHash(base+hashBegin,hashReturn-hashBegin+1)!=0x99ed5fc50ec41cddULL
         || std::memcmp(base+site,original,16)) {
         error="Culling insertion differs from the supported build.";return false;

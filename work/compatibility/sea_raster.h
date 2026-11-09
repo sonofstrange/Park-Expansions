@@ -1,6 +1,7 @@
 #pragma once
 #include "sea_raster_plan.h"
 #include "sea_raster_1122.h"
+#include "sea_raster_1123.h"
 
 static uint64_t seaHash(const unsigned char* first, size_t length) {
     uint64_t h=14695981039346656037ULL;
@@ -12,8 +13,10 @@ static uint64_t seaHash(const unsigned char* first, size_t length) {
 // Keep the 4096 raster for the whole process, including later 1024/2048 parks.
 // No detours, injected calls, shared float-constant changes or disk EXE edits.
 static bool configureSeaRaster(unsigned char* base, size_t size, std::string& error) {
-    const auto& guards=updatedGameBuild?game1122::seaGuards:seaGuards;
-    const auto& patches=updatedGameBuild?game1122::seaPatches:seaPatches;
+    const auto* guardData=latestGameBuild?game1123::seaGuards:updatedGameBuild?game1122::seaGuards:seaGuards;
+    const auto* patchData=latestGameBuild?game1123::seaPatches:updatedGameBuild?game1122::seaPatches:seaPatches;
+    const std::vector<SeaGuard> guards(guardData,guardData+2);
+    const std::vector<SeaPatch> patches(patchData,patchData+38);
     bool original=true,replacement=true;
     for(const auto& g:guards) {
         if(g.end>size || g.begin>=g.end) { error="Sea code range is unavailable.";return false; }

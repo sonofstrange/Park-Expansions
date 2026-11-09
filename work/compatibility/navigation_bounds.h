@@ -47,10 +47,11 @@ static unsigned char* allocateNavigationConstants(unsigned char* nearAddress) {
 }
 
 static bool configureNavigationBounds(unsigned char* base,size_t size,std::string& error) {
-    const uint32_t begin=updatedGameBuild?0x169a650:0x164c500,end=begin+0x2f5;
+    const uint32_t begin=latestGameBuild?0x169b120:updatedGameBuild?0x169a650:0x164c500,end=begin+0x2f5;
     const uint32_t loads[2]={begin+12,begin+24};
     const uint8_t updatedOriginal[2][7]={{0x0f,0x28,0x2d,0xcd,0x6b,0xa9,0x01},{0x0f,0x28,0x1d,0x61,0x66,0xa9,0x01}};
-    const auto& original=updatedGameBuild?updatedOriginal:navigationOriginal;
+    const uint8_t latestOriginal[2][7]={{0x0f,0x28,0x2d,0x4d,0x73,0xa9,0x01},{0x0f,0x28,0x1d,0xe1,0x6d,0xa9,0x01}};
+    const auto& original=latestGameBuild?latestOriginal:updatedGameBuild?updatedOriginal:navigationOriginal;
     if(size<end) {error="Navigation initializer is outside the image.";return false;}
     if(navigationImage==base && navigationConstants) {
         for(int i=0;i<2;++i) if(std::memcmp(base+loads[i],navigationReplacement[i],7)) {
@@ -58,7 +59,7 @@ static bool configureNavigationBounds(unsigned char* base,size_t size,std::strin
         }
         return true;
     }
-    if(seaHash(base+begin,end-begin)!=(updatedGameBuild?0xd454d37935618ffaULL:0x376019742a709b97ULL)) {
+    if(seaHash(base+begin,end-begin)!=(latestGameBuild?0x1a5af97a71403d57ULL:updatedGameBuild?0xd454d37935618ffaULL:0x376019742a709b97ULL)) {
         error="Navigation initializer differs from the supported build.";return false;
     }
     for(int i=0;i<2;++i) if(std::memcmp(base+loads[i],original[i],7)) {

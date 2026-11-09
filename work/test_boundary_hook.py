@@ -4,7 +4,7 @@ from pathlib import Path
 import pefile
 from native_test_build import identify,select
 pe=pefile.PE(r'D:/SteamLibrary/steamapps/common/Planet Coaster 2/PlanetCoaster2.exe',fast_load=True)
-updated=identify(pe);site=0xe48550 if updated else 0xdf4430
+updated=identify(pe);site=0xe492e0 if pe.FILE_HEADER.TimeDateStamp==0x6ae8f335 else 0xe48550 if updated else 0xdf4430
 k=c.WinDLL('kernel32',use_last_error=True)
 k.VirtualAlloc.argtypes=[c.c_void_p,c.c_size_t,c.c_uint32,c.c_uint32];k.VirtualAlloc.restype=c.c_void_p
 k.VirtualFree.argtypes=[c.c_void_p,c.c_size_t,c.c_uint32]

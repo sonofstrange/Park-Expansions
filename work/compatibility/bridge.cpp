@@ -87,7 +87,7 @@ static bool __fastcall Hooked_IsPositionWithinParkBoundary(void* rcx, const floa
 
 static bool installBoundaryHook(unsigned char* base, size_t size, std::string& error) {
     if (g_boundary_hook_installed) return true;
-    const uint32_t rva = updatedGameBuild?0xe48550:0xdf4430;
+    const uint32_t rva = latestGameBuild?0xe492e0:updatedGameBuild?0xe48550:0xdf4430;
     if (rva + 16 > size) {
         error = "Boundary hook RVA out of range.";
         return false;
@@ -1927,7 +1927,7 @@ extern "C" __declspec(dllexport) int Begin(void* L) {
             // Do not abort a safe terrain load before CPTWorld can initialize.
             if (ok_sea && ok_hook)
                 atomicWrite(status, "return {status=\"sea_ready\",seaRaster=4096,boundaryHook=true,gameBuild=\""+
-                    std::string(updatedGameBuild?"1.12.2.1035111":"legacy-6abfabee")+"\",navigationHalfSize="+
+                    std::string(latestGameBuild?"1.12.3.1040146":updatedGameBuild?"1.12.2.1035111":"legacy-6abfabee")+"\",navigationHalfSize="+
                     std::string(ok_nav?"2048":"512")+",navigationError="+(ok_nav?"nil":"\""+nav_error+"\"")+
                     ",crowdGridSize="+(ok_crowd?"4096":"1024")+",crowdGridError="+(ok_crowd?"nil":"\""+crowd_error+"\"")+",cullingRehashFix="+(ok_culling?"true":"false")+
                     ",cullingError="+(ok_culling?"nil":"\""+culling_error+"\"")+"}\n");

@@ -2,6 +2,12 @@
 
 All notable changes to **Park Expansions** (`Mod_BoundaryLab`) are documented in this file.
 
+## [0.64] - 2026-11-09
+
+- Added a separately gated native profile for Planet Coaster 2 1.12.3.1040146. Previous executable profiles are retained.
+- Relocated Sea raster, navigation, crowd grid, boundary hook and culling code with full hash/instruction checks. Sea, navigation and crowd functions match the previous build after normalizing address relocations.
+- Private native tests pass for the new executable, including culling rehash and crowd bounds. The user confirmed that the updated mod works in game.
+
 ## [0.63] - 2026-11-04
 
 ### Added

@@ -6,16 +6,17 @@ static unsigned char* crowdGridImage=nullptr;
 static unsigned char* crowdGridConstant=nullptr;
 static uint8_t crowdGridReplacement[8]{};
 static bool configureCrowdGrid(unsigned char* base,size_t size,std::string& error) {
-    const uint32_t begin=updatedGameBuild?0x996f80:0x96c870,end=begin+0xd8d,load=begin+0x5b8;
+    const uint32_t begin=latestGameBuild?0x997df0:updatedGameBuild?0x996f80:0x96c870,end=begin+0xd8d,load=begin+0x5b8;
     constexpr uint8_t legacyOriginal[8]={0xf3,0x0f,0x10,0x0d,0x08,0xb5,0x62,0x02};
     constexpr uint8_t updatedOriginal[8]={0xf3,0x0f,0x10,0x0d,0x30,0xfc,0x64,0x02};
-    const auto& original=updatedGameBuild?updatedOriginal:legacyOriginal;
+    const uint8_t latestOriginal[8]={0xf3,0x0f,0x10,0x0d,0x58,0xff,0x64,0x02};
+    const auto& original=latestGameBuild?latestOriginal:updatedGameBuild?updatedOriginal:legacyOriginal;
     if(size<end) {error="Crowd constructor is outside the image.";return false;}
     if(crowdGridImage==base && crowdGridConstant) {
         if(!std::memcmp(base+load,crowdGridReplacement,8)) return true;
         error="Crowd grid instruction changed after initialization.";return false;
     }
-    if(seaHash(base+begin,end-begin)!=(updatedGameBuild?0x18d50e6d3fef0033ULL:0x0bb69904d3595496ULL) || std::memcmp(base+load,original,8)) {
+    if(seaHash(base+begin,end-begin)!=(latestGameBuild?0x56af1a2d8069a70eULL:updatedGameBuild?0x18d50e6d3fef0033ULL:0x0bb69904d3595496ULL) || std::memcmp(base+load,original,8)) {
         error="Crowd constructor differs from the supported build.";return false;
     }
     auto memory=allocateNavigationConstants(base+load);
